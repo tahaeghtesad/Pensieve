@@ -10,15 +10,24 @@ export interface PensieveSettings {
 	topK: number;
 	systemPrompt: string;
 	maxChatHistory: number;
+	// Agent settings
+	agentEnabled: boolean;
+	maxAgentIterations: number;
+	dailyNoteFolder: string;
+	weeklyNoteFolder: string;
 }
 
 export const DEFAULT_SETTINGS: PensieveSettings = {
 	ollamaUrl: "http://localhost:11434",
-	chatModel: "gemma3:4b",
+	chatModel: "gemma4:e2b",
 	embeddingModel: "nomic-embed-text",
 	chunkSize: 500,
 	chunkOverlap: 50,
 	topK: 5,
+	agentEnabled: true,
+	maxAgentIterations: 10,
+	dailyNoteFolder: "Daily",
+	weeklyNoteFolder: "Weekly",
 	systemPrompt:
 		"You are Pensieve, a helpful AI assistant embedded in Obsidian. " +
 		"You help the user understand and navigate their notes. " +
@@ -61,10 +70,10 @@ export class PensieveSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Chat model")
-			.setDesc("Ollama model tag for chat completions (e.g. gemma3:4b)")
+			.setDesc("Ollama model tag for chat completions (e.g. gemma4:e2b)")
 			.addText((text) =>
 				text
-					.setPlaceholder("gemma3:4b")
+					.setPlaceholder("gemma4:e2b")
 					.setValue(this.plugin.settings.chatModel)
 					.onChange(async (value) => {
 						this.plugin.settings.chatModel = value;
@@ -148,6 +157,63 @@ export class PensieveSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.systemPrompt)
 					.onChange(async (value) => {
 						this.plugin.settings.systemPrompt = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// ── Agent Settings ─────────────────────────────────────
+		containerEl.createEl("h3", { text: "Agentic Mode" });
+
+		new Setting(containerEl)
+			.setName("Enable agentic mode")
+			.setDesc("Automatically route write/plan/review/factcheck tasks to specialist agents")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.agentEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.agentEnabled = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Max agent iterations")
+			.setDesc("Maximum tool-call cycles per agent run (default 10)")
+			.addText((text) =>
+				text
+					.setPlaceholder("10")
+					.setValue(String(this.plugin.settings.maxAgentIterations))
+					.onChange(async (value) => {
+						const n = parseInt(value, 10);
+						if (!isNaN(n) && n > 0) {
+							this.plugin.settings.maxAgentIterations = n;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Daily note folder")
+			.setDesc("Folder for daily notes (e.g. Daily)")
+			.addText((text) =>
+				text
+					.setPlaceholder("Daily")
+					.setValue(this.plugin.settings.dailyNoteFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.dailyNoteFolder = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Weekly note folder")
+			.setDesc("Folder for weekly notes (e.g. Weekly)")
+			.addText((text) =>
+				text
+					.setPlaceholder("Weekly")
+					.setValue(this.plugin.settings.weeklyNoteFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.weeklyNoteFolder = value;
 						await this.plugin.saveSettings();
 					})
 			);

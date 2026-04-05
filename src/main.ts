@@ -9,6 +9,11 @@ import { VaultIndexer } from "./indexer";
 import { Retriever } from "./retriever";
 import { ChatHistoryManager, ChatHistoryData } from "./chathistory";
 import { PensieveChatView, VIEW_TYPE_PENSIEVE_CHAT } from "./chatview";
+import { ToolRegistry } from "./tools/registry";
+import { registerAllTools } from "./tools/notetools";
+import { registerWebTools } from "./tools/webtools";
+import { Orchestrator } from "./agents/orchestrator";
+import type { ToolContext } from "./tools/types";
 
 interface PensieveData {
 	settings: PensieveSettings;
@@ -21,48 +26,43 @@ export default class PensievePlugin extends Plugin {
 	indexer!: VaultIndexer;
 	retriever!: Retriever;
 	chatHistory: ChatHistoryManager = new ChatHistoryManager();
+	toolRegistry!: ToolRegistry;
+	toolCtx!: ToolContext;
+	orchestrator!: Orchestrator;
 
 	async onload(): Promise<void> {
 		console.log("[Pensieve] Loading plugin...");
 
-		// Load persisted data
 		await this.loadSettings();
 
-		// Initialize services
+		// Core services
 		this.ollama = new OllamaService(this.settings.ollamaUrl);
-		this.indexer = new VaultIndexer(
-			this.app.vault,
-			this.ollama,
-			this.settings
-		);
-		this.retriever = new Retriever(
-			this.ollama,
-			this.indexer.vectorStore,
-			this.settings
-		);
+		this.indexer = new VaultIndexer(this.app.vault, this.ollama, this.settings);
+		this.retriever = new Retriever(this.ollama, this.indexer.vectorStore, this.settings);
 
-		// Load saved vector index
 		await this.indexer.loadIndex();
 		this.retriever.setVectorStore(this.indexer.vectorStore);
 
-		// Register the chat view
-		this.registerView(
-			VIEW_TYPE_PENSIEVE_CHAT,
-			(leaf) => new PensieveChatView(leaf, this)
-		);
+		// Tool system
+		this.toolRegistry = new ToolRegistry();
+		this.toolCtx = {
+			vault: this.app.vault,
+			app: this.app,
+			retriever: this.retriever,
+			settings: this.settings,
+		};
+		registerAllTools(this.toolRegistry);
+		registerWebTools(this.toolRegistry);
 
-		// Ribbon icon
-		this.addRibbonIcon("brain", "Open Pensieve", () => {
-			this.activateView();
-		});
+		// Orchestrator
+		this.orchestrator = new Orchestrator(this.ollama, this.settings);
+
+		// UI
+		this.registerView(VIEW_TYPE_PENSIEVE_CHAT, (leaf) => new PensieveChatView(leaf, this));
+		this.addRibbonIcon("brain", "Open Pensieve", () => this.activateView());
 
 		// Commands
-		this.addCommand({
-			id: "open-chat",
-			name: "Open chat panel",
-			callback: () => this.activateView(),
-		});
-
+		this.addCommand({ id: "open-chat", name: "Open chat panel", callback: () => this.activateView() });
 		this.addCommand({
 			id: "reindex-vault",
 			name: "Reindex vault",
@@ -72,35 +72,21 @@ export default class PensievePlugin extends Plugin {
 			},
 		});
 
-		// Settings tab
 		this.addSettingTab(new PensieveSettingTab(this.app, this));
 
-		// File change listeners for incremental indexing
-		this.registerEvent(
-			this.app.vault.on("modify", (file: TAbstractFile) => {
-				if (file instanceof TFile && file.extension === "md") {
-					// Debounce — wait 2s after last modify
-					this.debouncedIndex(file);
-				}
-			})
-		);
-
-		this.registerEvent(
-			this.app.vault.on("delete", (file: TAbstractFile) => {
-				if (file instanceof TFile && file.extension === "md") {
-					this.indexer.onFileDelete(file.path);
-				}
-			})
-		);
-
-		this.registerEvent(
-			this.app.vault.on("rename", (file: TAbstractFile, oldPath: string) => {
-				if (file instanceof TFile && file.extension === "md") {
-					this.indexer.onFileDelete(oldPath);
-					this.debouncedIndex(file);
-				}
-			})
-		);
+		// Incremental indexing
+		this.registerEvent(this.app.vault.on("modify", (f: TAbstractFile) => {
+			if (f instanceof TFile && f.extension === "md") this.debouncedIndex(f);
+		}));
+		this.registerEvent(this.app.vault.on("delete", (f: TAbstractFile) => {
+			if (f instanceof TFile && f.extension === "md") this.indexer.onFileDelete(f.path);
+		}));
+		this.registerEvent(this.app.vault.on("rename", (f: TAbstractFile, old: string) => {
+			if (f instanceof TFile && f.extension === "md") {
+				this.indexer.onFileDelete(old);
+				this.debouncedIndex(f);
+			}
+		}));
 
 		console.log("[Pensieve] Plugin loaded.");
 	}
@@ -109,71 +95,43 @@ export default class PensievePlugin extends Plugin {
 		console.log("[Pensieve] Unloading plugin.");
 	}
 
-	// ── Debounced file indexing ─────────────────────────────────
 	private indexTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-
 	private debouncedIndex(file: TFile): void {
-		const existing = this.indexTimers.get(file.path);
-		if (existing) clearTimeout(existing);
-
-		this.indexTimers.set(
-			file.path,
-			setTimeout(async () => {
-				this.indexTimers.delete(file.path);
-				await this.indexer.indexFile(file);
-				this.retriever.setVectorStore(this.indexer.vectorStore);
-			}, 2000)
-		);
+		const t = this.indexTimers.get(file.path);
+		if (t) clearTimeout(t);
+		this.indexTimers.set(file.path, setTimeout(async () => {
+			this.indexTimers.delete(file.path);
+			await this.indexer.indexFile(file);
+			this.retriever.setVectorStore(this.indexer.vectorStore);
+		}, 2000));
 	}
 
-	// ── View activation ─────────────────────────────────────────
 	async activateView(): Promise<void> {
 		const { workspace } = this.app;
-		let leaf: WorkspaceLeaf | null = null;
 		const leaves = workspace.getLeavesOfType(VIEW_TYPE_PENSIEVE_CHAT);
-
-		if (leaves.length > 0) {
-			leaf = leaves[0] ?? null;
-		} else {
+		let leaf: WorkspaceLeaf | null = leaves.length > 0 ? (leaves[0] ?? null) : null;
+		if (!leaf) {
 			leaf = workspace.getRightLeaf(false);
-			if (leaf) {
-				await leaf.setViewState({
-					type: VIEW_TYPE_PENSIEVE_CHAT,
-					active: true,
-				});
-			}
+			if (leaf) await leaf.setViewState({ type: VIEW_TYPE_PENSIEVE_CHAT, active: true });
 		}
-
-		if (leaf) {
-			workspace.revealLeaf(leaf);
-		}
+		if (leaf) workspace.revealLeaf(leaf);
 	}
 
-	// ── Settings persistence ────────────────────────────────────
 	async loadSettings(): Promise<void> {
 		const data = (await this.loadData()) as PensieveData | null;
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			data?.settings ?? {}
-		);
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data?.settings ?? {});
 		this.chatHistory.load(data?.chatHistory ?? null);
 	}
 
 	async saveSettings(): Promise<void> {
-		// Update Ollama URL if it changed
 		this.ollama?.setBaseUrl(this.settings.ollamaUrl);
-
-		await this.saveData({
-			settings: this.settings,
-			chatHistory: this.chatHistory.serialize(),
-		});
+		this.orchestrator?.updateSettings(this.settings);
+		// Keep toolCtx settings reference in sync
+		if (this.toolCtx) this.toolCtx.settings = this.settings;
+		await this.saveData({ settings: this.settings, chatHistory: this.chatHistory.serialize() });
 	}
 
 	async saveChatHistory(): Promise<void> {
-		await this.saveData({
-			settings: this.settings,
-			chatHistory: this.chatHistory.serialize(),
-		});
+		await this.saveData({ settings: this.settings, chatHistory: this.chatHistory.serialize() });
 	}
 }

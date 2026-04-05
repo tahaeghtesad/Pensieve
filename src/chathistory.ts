@@ -5,6 +5,7 @@ export interface ChatMessage {
 	role: "user" | "assistant" | "system";
 	content: string;
 	sources?: string[];
+	affectedFiles?: string[];
 	timestamp: number;
 }
 

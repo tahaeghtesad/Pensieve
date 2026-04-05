@@ -3,17 +3,16 @@ import {
 	WorkspaceLeaf,
 	MarkdownRenderer,
 	setIcon,
+	TFile,
 } from "obsidian";
 import type PensievePlugin from "./main";
 import type { ChatMessage } from "./chathistory";
+import type { AgentContext, TraceStep } from "./agents/types";
 
 export const VIEW_TYPE_PENSIEVE_CHAT = "pensieve-chat-view";
 
 export class PensieveChatView extends ItemView {
 	plugin: PensievePlugin;
-
-	// DOM elements
-	private headerEl!: HTMLElement;
 	private statusDot!: HTMLElement;
 	private statusText!: HTMLElement;
 	private chatContainer!: HTMLElement;
@@ -22,8 +21,6 @@ export class PensieveChatView extends ItemView {
 	private sendBtn!: HTMLButtonElement;
 	private sessionListEl!: HTMLElement;
 	private showingSessions = false;
-
-	// State
 	private isGenerating = false;
 	private abortSignal = { aborted: false };
 
@@ -32,139 +29,73 @@ export class PensieveChatView extends ItemView {
 		this.plugin = plugin;
 	}
 
-	getViewType(): string {
-		return VIEW_TYPE_PENSIEVE_CHAT;
-	}
-
-	getDisplayText(): string {
-		return "Pensieve";
-	}
-
-	getIcon(): string {
-		return "brain";
-	}
+	getViewType(): string { return VIEW_TYPE_PENSIEVE_CHAT; }
+	getDisplayText(): string { return "Pensieve"; }
+	getIcon(): string { return "brain"; }
 
 	async onOpen(): Promise<void> {
 		const root = this.contentEl;
 		root.empty();
 		root.addClass("pensieve-root");
 
-		// ── Header ──────────────────────────────────────────────
-		this.headerEl = root.createDiv({ cls: "pensieve-header" });
+		// Header
+		const header = root.createDiv({ cls: "pensieve-header" });
+		const titleRow = header.createDiv({ cls: "pensieve-header-title-row" });
+		const titleEl = titleRow.createEl("span", { cls: "pensieve-title", text: "Pensieve" });
+		setIcon(titleEl.createSpan({ cls: "pensieve-title-icon" }), "brain");
 
-		const titleRow = this.headerEl.createDiv({
-			cls: "pensieve-header-title-row",
-		});
-		const titleEl = titleRow.createEl("span", {
-			cls: "pensieve-title",
-			text: "Pensieve",
-		});
-
-		const brainIcon = titleEl.createSpan({ cls: "pensieve-title-icon" });
-		setIcon(brainIcon, "brain");
-
-		// Status
 		const statusEl = titleRow.createDiv({ cls: "pensieve-status" });
 		this.statusDot = statusEl.createSpan({ cls: "pensieve-status-dot" });
-		this.statusText = statusEl.createSpan({
-			cls: "pensieve-status-text",
-			text: "Checking...",
-		});
+		this.statusText = statusEl.createSpan({ cls: "pensieve-status-text", text: "Checking..." });
 
-		// Action buttons row
-		const actionsRow = this.headerEl.createDiv({
-			cls: "pensieve-header-actions",
-		});
+		const actions = header.createDiv({ cls: "pensieve-header-actions" });
+		const mkBtn = (icon: string, label: string, fn: () => void) => {
+			const b = actions.createEl("button", { cls: "pensieve-action-btn", attr: { title: label } });
+			setIcon(b, icon); b.addEventListener("click", fn); return b;
+		};
+		mkBtn("plus", "New Chat", () => this.onNewChat());
+		mkBtn("history", "Chat History", () => this.toggleSessionList());
+		mkBtn("refresh-cw", "Reindex Vault", () => this.onReindex());
 
-		const newChatBtn = actionsRow.createEl("button", {
-			cls: "pensieve-action-btn",
-			attr: { "aria-label": "New Chat", title: "New Chat" },
-		});
-		setIcon(newChatBtn, "plus");
-		newChatBtn.addEventListener("click", () => this.onNewChat());
-
-		const sessionsBtn = actionsRow.createEl("button", {
-			cls: "pensieve-action-btn",
-			attr: { "aria-label": "Chat History", title: "Chat History" },
-		});
-		setIcon(sessionsBtn, "history");
-		sessionsBtn.addEventListener("click", () => this.toggleSessionList());
-
-		const reindexBtn = actionsRow.createEl("button", {
-			cls: "pensieve-action-btn",
-			attr: { "aria-label": "Reindex Vault", title: "Reindex Vault" },
-		});
-		setIcon(reindexBtn, "refresh-cw");
-		reindexBtn.addEventListener("click", () => this.onReindex());
-
-		// ── Session list (hidden by default) ────────────────────
-		this.sessionListEl = root.createDiv({
-			cls: "pensieve-session-list hidden",
-		});
-
-		// ── Chat container ──────────────────────────────────────
+		this.sessionListEl = root.createDiv({ cls: "pensieve-session-list hidden" });
 		this.chatContainer = root.createDiv({ cls: "pensieve-chat" });
-
-		// ── Input area ──────────────────────────────────────────
 		this.inputArea = root.createDiv({ cls: "pensieve-input-area" });
 
 		this.textInput = this.inputArea.createEl("textarea", {
 			cls: "pensieve-input",
-			attr: {
-				placeholder: "Ask about your vault...",
-				rows: "1",
-			},
+			attr: { placeholder: "Ask or instruct… (e.g. 'Add a daily note', 'Review my plan')", rows: "1" },
 		});
-
-		this.sendBtn = this.inputArea.createEl("button", {
-			cls: "pensieve-send-btn",
-			attr: { "aria-label": "Send" },
-		});
+		this.sendBtn = this.inputArea.createEl("button", { cls: "pensieve-send-btn", attr: { "aria-label": "Send" } });
 		setIcon(this.sendBtn, "send");
 
-		// Auto-resize textarea
 		this.textInput.addEventListener("input", () => {
 			this.textInput.style.height = "auto";
-			this.textInput.style.height =
-				Math.min(this.textInput.scrollHeight, 150) + "px";
+			this.textInput.style.height = Math.min(this.textInput.scrollHeight, 150) + "px";
 		});
-
-		// Send on Enter (Shift+Enter for newline)
 		this.textInput.addEventListener("keydown", (e) => {
-			if (e.key === "Enter" && !e.shiftKey) {
-				e.preventDefault();
-				this.onSend();
-			}
+			if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.onSend(); }
 		});
-
 		this.sendBtn.addEventListener("click", () => this.onSend());
 
-		// Render existing messages from active session
 		this.renderAllMessages();
-
-		// Check Ollama status
 		this.checkOllamaStatus();
 	}
 
-	async onClose(): Promise<void> {
-		this.abortSignal.aborted = true;
-	}
+	async onClose(): Promise<void> { this.abortSignal.aborted = true; }
 
-	// ── Ollama Status ─────────────────────────────────────────
+	// ── Status ────────────────────────────────────────────────
 	private async checkOllamaStatus(): Promise<void> {
 		try {
 			await this.plugin.ollama.checkConnection();
-			this.statusDot.classList.add("connected");
-			this.statusDot.classList.remove("disconnected");
+			this.statusDot.className = "pensieve-status-dot connected";
 			this.statusText.setText("Connected");
 		} catch {
-			this.statusDot.classList.add("disconnected");
-			this.statusDot.classList.remove("connected");
+			this.statusDot.className = "pensieve-status-dot disconnected";
 			this.statusText.setText("Disconnected");
 		}
 	}
 
-	// ── Session Management ────────────────────────────────────
+	// ── Session management ────────────────────────────────────
 	private onNewChat(): void {
 		this.plugin.chatHistory.createSession();
 		this.renderAllMessages();
@@ -173,11 +104,7 @@ export class PensieveChatView extends ItemView {
 	}
 
 	private toggleSessionList(): void {
-		if (this.showingSessions) {
-			this.hideSessionList();
-		} else {
-			this.showSessionList();
-		}
+		this.showingSessions ? this.hideSessionList() : this.showSessionList();
 	}
 
 	private showSessionList(): void {
@@ -197,160 +124,145 @@ export class PensieveChatView extends ItemView {
 
 	private renderSessionList(): void {
 		this.sessionListEl.empty();
-
 		const sessions = this.plugin.chatHistory.getSessions();
 		if (sessions.length === 0) {
-			this.sessionListEl.createDiv({
-				cls: "pensieve-empty-sessions",
-				text: "No chat history yet.",
-			});
+			this.sessionListEl.createDiv({ cls: "pensieve-empty-sessions", text: "No chat history yet." });
 			return;
 		}
+		const back = this.sessionListEl.createEl("button", { cls: "pensieve-action-btn pensieve-back-btn", text: "← Back to chat" });
+		back.addEventListener("click", () => this.hideSessionList());
 
-		const backBtn = this.sessionListEl.createEl("button", {
-			cls: "pensieve-action-btn pensieve-back-btn",
-			text: "← Back to chat",
-		});
-		backBtn.addEventListener("click", () => this.hideSessionList());
-
-		for (const session of sessions) {
-			const item = this.sessionListEl.createDiv({
-				cls: "pensieve-session-item",
-			});
-
+		for (const s of sessions) {
+			const item = this.sessionListEl.createDiv({ cls: "pensieve-session-item" });
 			const info = item.createDiv({ cls: "pensieve-session-info" });
-			info.createDiv({
-				cls: "pensieve-session-title",
-				text: session.title,
-			});
-			info.createDiv({
-				cls: "pensieve-session-date",
-				text: new Date(session.updatedAt).toLocaleString(),
-			});
-
+			info.createDiv({ cls: "pensieve-session-title", text: s.title });
+			info.createDiv({ cls: "pensieve-session-date", text: new Date(s.updatedAt).toLocaleString() });
 			info.addEventListener("click", () => {
-				this.plugin.chatHistory.setActiveSession(session.id);
+				this.plugin.chatHistory.setActiveSession(s.id);
 				this.renderAllMessages();
 				this.hideSessionList();
 			});
-
-			const deleteBtn = item.createEl("button", {
-				cls: "pensieve-session-delete",
-				attr: { "aria-label": "Delete session" },
-			});
-			setIcon(deleteBtn, "trash-2");
-			deleteBtn.addEventListener("click", (e) => {
+			const del = item.createEl("button", { cls: "pensieve-session-delete", attr: { "aria-label": "Delete" } });
+			setIcon(del, "trash-2");
+			del.addEventListener("click", (e) => {
 				e.stopPropagation();
-				this.plugin.chatHistory.deleteSession(session.id);
+				this.plugin.chatHistory.deleteSession(s.id);
 				this.plugin.saveChatHistory();
 				this.renderSessionList();
 			});
 		}
 	}
 
-	// ── Message Rendering ─────────────────────────────────────
+	// ── Message rendering ────────────────────────────────────
 	private renderAllMessages(): void {
 		this.chatContainer.empty();
 		const session = this.plugin.chatHistory.getActiveSession();
-
-		if (session.messages.length === 0) {
-			this.renderWelcome();
-			return;
-		}
-
+		if (session.messages.length === 0) { this.renderWelcome(); return; }
 		for (const msg of session.messages) {
 			if (msg.role === "system") continue;
 			this.appendMessageBubble(msg);
 		}
-
 		this.scrollToBottom();
 	}
 
 	private renderWelcome(): void {
-		const welcome = this.chatContainer.createDiv({
-			cls: "pensieve-welcome",
-		});
-		const iconEl = welcome.createDiv({ cls: "pensieve-welcome-icon" });
-		setIcon(iconEl, "brain");
-		welcome.createEl("h3", { text: "Welcome to Pensieve" });
-		welcome.createEl("p", {
-			text: "Ask me anything about your vault. I'll search through your notes and provide contextual answers.",
-		});
-		const hint = welcome.createDiv({ cls: "pensieve-welcome-hint" });
-		hint.createEl("p", {
-			text: '💡 Tip: Run "Reindex Vault" first to enable context-aware answers.',
-		});
+		const w = this.chatContainer.createDiv({ cls: "pensieve-welcome" });
+		setIcon(w.createDiv({ cls: "pensieve-welcome-icon" }), "brain");
+		w.createEl("h3", { text: "Welcome to Pensieve" });
+		w.createEl("p", { text: "Ask questions about your vault or give instructions to modify it." });
+		const hint = w.createDiv({ cls: "pensieve-welcome-hint" });
+		hint.createEl("p", { text: "💡 Examples:" });
+		const examples = [
+			"Ask: \"What did I write about machine learning?\"",
+			"Write: \"Add a daily note: worked on Pensieve plugin\"",
+			"Plan: \"Create a reading plan for my ML papers\"",
+			"Review: \"Review my Project Alpha note\"",
+			"Fact-check: \"Verify claims in my AI Research note\"",
+		];
+		for (const ex of examples) hint.createEl("p", { text: ex, cls: "pensieve-welcome-example" });
 	}
 
 	private appendMessageBubble(msg: ChatMessage): HTMLElement {
-		const bubble = this.chatContainer.createDiv({
-			cls: `pensieve-bubble pensieve-bubble-${msg.role}`,
-		});
-
+		const bubble = this.chatContainer.createDiv({ cls: `pensieve-bubble pensieve-bubble-${msg.role}` });
 		const contentEl = bubble.createDiv({ cls: "pensieve-bubble-content" });
 
-		// Render markdown for assistant messages
 		if (msg.role === "assistant") {
-			MarkdownRenderer.render(
-				this.app,
-				msg.content || "...",
-				contentEl,
-				"",
-				this
-			);
+			MarkdownRenderer.render(this.app, msg.content || "...", contentEl, "", this);
 		} else {
-			contentEl.createDiv({
-				cls: "pensieve-bubble-text",
-				text: msg.content,
-			});
+			contentEl.createDiv({ cls: "pensieve-bubble-text", text: msg.content });
 		}
 
-		// Source citations
+		// Sources
 		if (msg.sources && msg.sources.length > 0) {
-			const sourcesEl = bubble.createDiv({
-				cls: "pensieve-sources",
-			});
-			const toggle = sourcesEl.createEl("button", {
-				cls: "pensieve-sources-toggle",
-				text: `📎 ${msg.sources.length} source${msg.sources.length > 1 ? "s" : ""}`,
-			});
-
-			const sourceList = sourcesEl.createDiv({
-				cls: "pensieve-sources-list hidden",
-			});
-			for (const src of msg.sources) {
-				const srcItem = sourceList.createDiv({
-					cls: "pensieve-source-item",
-				});
-				srcItem.createEl("a", {
-					cls: "pensieve-source-link",
-					text: src,
-					href: src,
-				});
-				srcItem.addEventListener("click", (e) => {
-					e.preventDefault();
-					const file = this.app.vault.getAbstractFileByPath(src);
-					if (file) {
-						this.app.workspace.openLinkText(src, "", false);
-					}
-				});
-			}
-
-			toggle.addEventListener("click", () => {
-				sourceList.classList.toggle("hidden");
-			});
+			this.renderFileList(bubble, msg.sources, "📎", "sources");
 		}
 
-		// Timestamp
-		bubble.createDiv({
-			cls: "pensieve-bubble-time",
-			text: new Date(msg.timestamp).toLocaleTimeString(),
-		});
+		// Affected files (agent writes)
+		if (msg.affectedFiles && msg.affectedFiles.length > 0) {
+			this.renderFileList(bubble, msg.affectedFiles, "✏️", "affected");
+		}
 
+		bubble.createDiv({ cls: "pensieve-bubble-time", text: new Date(msg.timestamp).toLocaleTimeString() });
 		return bubble;
 	}
 
-	// ── Sending Messages ──────────────────────────────────────
+	private renderFileList(parent: HTMLElement, files: string[], icon: string, cls: string): void {
+		const el = parent.createDiv({ cls: `pensieve-sources pensieve-${cls}` });
+		const toggle = el.createEl("button", {
+			cls: "pensieve-sources-toggle",
+			text: `${icon} ${files.length} ${cls === "affected" ? "modified" : `source${files.length > 1 ? "s" : ""}`}`,
+		});
+		const list = el.createDiv({ cls: "pensieve-sources-list hidden" });
+		for (const f of files) {
+			const item = list.createDiv({ cls: "pensieve-source-item" });
+			const a = item.createEl("a", { cls: "pensieve-source-link", text: f, href: f });
+			a.addEventListener("click", (e) => {
+				e.preventDefault();
+				this.app.workspace.openLinkText(f, "", false);
+			});
+		}
+		toggle.addEventListener("click", () => list.classList.toggle("hidden"));
+	}
+
+	// ── Trace UI ─────────────────────────────────────────────
+	private createTraceContainer(): { wrap: HTMLElement; list: HTMLElement; toggle: HTMLElement } {
+		const wrap = this.chatContainer.createDiv({ cls: "pensieve-trace" });
+		const toggle = wrap.createEl("button", { cls: "pensieve-trace-toggle", text: "⚙ Thinking…" });
+		const list = wrap.createDiv({ cls: "pensieve-trace-list hidden" });
+		toggle.addEventListener("click", () => list.classList.toggle("hidden"));
+		return { wrap, list, toggle };
+	}
+
+	private appendTraceStep(step: TraceStep, list: HTMLElement): void {
+		const row = list.createDiv({ cls: `pensieve-trace-step pensieve-trace-${step.type}` });
+		const icons: Record<string, string> = {
+			thought: "💭", tool_call: "🔧", observation: "👁", agent_handoff: "→", error: "⚠️",
+		};
+		row.createSpan({ cls: "pensieve-trace-icon", text: icons[step.type] ?? "•" });
+		const body = row.createDiv({ cls: "pensieve-trace-body" });
+
+		if (step.type === "tool_call" && step.toolName) {
+			body.createEl("strong", { text: step.toolName });
+			if (step.toolArgs && Object.keys(step.toolArgs).length > 0) {
+				const args = body.createEl("pre", { cls: "pensieve-trace-args" });
+				args.createEl("code", { text: JSON.stringify(step.toolArgs, null, 2) });
+			}
+		} else {
+			MarkdownRenderer.render(this.app, step.content, body, "", this);
+		}
+	}
+
+	// ── Typing indicator ──────────────────────────────────────
+	private showTyping(): HTMLElement {
+		const el = this.chatContainer.createDiv({ cls: "pensieve-typing" });
+		el.createSpan({ cls: "pensieve-typing-dot" });
+		el.createSpan({ cls: "pensieve-typing-dot" });
+		el.createSpan({ cls: "pensieve-typing-dot" });
+		this.scrollToBottom();
+		return el;
+	}
+
+	// ── Send ──────────────────────────────────────────────────
 	private async onSend(): Promise<void> {
 		const text = this.textInput.value.trim();
 		if (!text || this.isGenerating) return;
@@ -361,99 +273,104 @@ export class PensieveChatView extends ItemView {
 		this.textInput.value = "";
 		this.textInput.style.height = "auto";
 
-		// Add user message
-		const userMsg: ChatMessage = {
-			role: "user",
-			content: text,
-			timestamp: Date.now(),
-		};
+		const userMsg: ChatMessage = { role: "user", content: text, timestamp: Date.now() };
 		this.plugin.chatHistory.addMessage(userMsg);
 		this.appendMessageBubble(userMsg);
-		this.scrollToBottom();
 
-		// Show typing indicator
-		const typingEl = this.chatContainer.createDiv({
-			cls: "pensieve-typing",
-		});
-		typingEl.createSpan({ cls: "pensieve-typing-dot" });
-		typingEl.createSpan({ cls: "pensieve-typing-dot" });
-		typingEl.createSpan({ cls: "pensieve-typing-dot" });
-		this.scrollToBottom();
+		const typing = this.showTyping();
 
 		try {
-			// Retrieve context
+			// RAG context (used by both paths)
 			const chunks = await this.plugin.retriever.retrieve(text);
 			const context = this.plugin.retriever.buildContext(chunks);
-			const sources = [
-				...new Set(chunks.map((c) => c.filePath)),
-			];
-
-			// Build messages
+			const sources = [...new Set(chunks.map((c) => c.filePath))];
 			const history = this.plugin.chatHistory.getOllamaHistory();
-			// Remove the last message since we add it in buildMessages
-			history.pop();
-			const messages = this.plugin.retriever.buildMessages(
-				this.plugin.settings.systemPrompt,
-				context,
-				history,
-				text
-			);
+			history.pop(); // will be added by buildMessages / agent
 
-			// Add placeholder assistant message
-			const assistantMsg: ChatMessage = {
-				role: "assistant",
-				content: "",
-				sources: sources.length > 0 ? sources : undefined,
-				timestamp: Date.now(),
-			};
-			this.plugin.chatHistory.addMessage(assistantMsg);
+			// Classify intent
+			const intent = await this.plugin.orchestrator.classify(text);
 
-			// Remove typing indicator
-			typingEl.remove();
+			if (intent === "direct_chat") {
+				// ── Streaming Q&A (unchanged) ────────────────────
+				const messages = this.plugin.retriever.buildMessages(
+					this.plugin.settings.systemPrompt, context, history, text
+				);
+				const assistantMsg: ChatMessage = {
+					role: "assistant", content: "",
+					sources: sources.length > 0 ? sources : undefined, timestamp: Date.now(),
+				};
+				this.plugin.chatHistory.addMessage(assistantMsg);
+				typing.remove();
 
-			// Create assistant bubble
-			const bubble = this.appendMessageBubble(assistantMsg);
-			const contentEl = bubble.querySelector(
-				".pensieve-bubble-content"
-			) as HTMLElement;
+				const bubble = this.appendMessageBubble(assistantMsg);
+				const contentEl = bubble.querySelector(".pensieve-bubble-content") as HTMLElement;
+				let fullContent = "";
 
-			let fullContent = "";
-
-			// Stream the response
-			await this.plugin.ollama.chat(
-				this.plugin.settings.chatModel,
-				messages,
-				(token) => {
+				await this.plugin.ollama.chat(this.plugin.settings.chatModel, messages, (token) => {
 					fullContent += token;
-					// Re-render markdown on each token
 					contentEl.empty();
-					MarkdownRenderer.render(
-						this.app,
-						fullContent,
-						contentEl,
-						"",
-						this
-					);
+					MarkdownRenderer.render(this.app, fullContent, contentEl, "", this);
 					this.scrollToBottom();
-				},
-				this.abortSignal
-			);
+				}, this.abortSignal);
 
-			// Final update
-			this.plugin.chatHistory.updateLastAssistantMessage(
-				fullContent,
-				sources.length > 0 ? sources : undefined
-			);
+				this.plugin.chatHistory.updateLastAssistantMessage(fullContent, sources.length > 0 ? sources : undefined);
+
+			} else {
+				// ── Agentic path ─────────────────────────────────
+				typing.remove();
+				const { wrap: traceWrap, list: traceList, toggle: traceToggle } = this.createTraceContainer();
+				this.scrollToBottom();
+
+				const agentCtx: AgentContext = {
+					userQuery: text,
+					chatHistory: history,
+					ragContext: context,
+					toolCtx: this.plugin.toolCtx,
+					toolRegistry: this.plugin.toolRegistry,
+					ollama: this.plugin.ollama,
+					settings: this.plugin.settings,
+					onTrace: (step: TraceStep) => {
+						this.appendTraceStep(step, traceList);
+						this.scrollToBottom();
+					},
+				};
+
+				const result = await this.plugin.orchestrator.runAgent(intent, agentCtx);
+
+				// Update trace toggle label
+				traceToggle.setText(`⚙ Reasoning (${result.traceSteps.length} steps) — click to expand`);
+
+				// Render final answer bubble
+				const assistantMsg: ChatMessage = {
+					role: "assistant",
+					content: result.answer,
+					sources: sources.length > 0 ? sources : undefined,
+					affectedFiles: result.affectedFiles.length > 0 ? result.affectedFiles : undefined,
+					timestamp: Date.now(),
+				};
+				this.plugin.chatHistory.addMessage(assistantMsg);
+				this.appendMessageBubble(assistantMsg);
+
+				// Re-index modified files
+				for (const fp of result.affectedFiles) {
+					const file = this.app.vault.getAbstractFileByPath(fp);
+					if (file instanceof TFile) {
+						await this.plugin.indexer.indexFile(file);
+					}
+				}
+				if (result.affectedFiles.length > 0) {
+					this.plugin.retriever.setVectorStore(this.plugin.indexer.vectorStore);
+				}
+			}
 		} catch (e) {
-			typingEl.remove();
-
-			const errorMsg: ChatMessage = {
+			typing.remove();
+			const errMsg: ChatMessage = {
 				role: "assistant",
-				content: `⚠️ **Error:** ${e}\n\nMake sure Ollama is running and the model \`${this.plugin.settings.chatModel}\` is available.`,
+				content: `⚠️ **Error:** ${e}\n\nMake sure Ollama is running with \`${this.plugin.settings.chatModel}\`.`,
 				timestamp: Date.now(),
 			};
-			this.plugin.chatHistory.addMessage(errorMsg);
-			this.appendMessageBubble(errorMsg);
+			this.plugin.chatHistory.addMessage(errMsg);
+			this.appendMessageBubble(errMsg);
 		} finally {
 			this.isGenerating = false;
 			this.sendBtn.classList.remove("disabled");
@@ -462,43 +379,22 @@ export class PensieveChatView extends ItemView {
 		}
 	}
 
+	// ── Reindex ───────────────────────────────────────────────
 	private async onReindex(): Promise<void> {
-		// Show inline progress
-		const progressEl = this.chatContainer.createDiv({
-			cls: "pensieve-progress",
-		});
-		const progressBar = progressEl.createDiv({
-			cls: "pensieve-progress-bar",
-		});
-		const progressFill = progressBar.createDiv({
-			cls: "pensieve-progress-fill",
-		});
-		const progressText = progressEl.createDiv({
-			cls: "pensieve-progress-text",
-			text: "Starting index...",
-		});
+		const prog = this.chatContainer.createDiv({ cls: "pensieve-progress" });
+		const fill = prog.createDiv({ cls: "pensieve-progress-bar" }).createDiv({ cls: "pensieve-progress-fill" });
+		const label = prog.createDiv({ cls: "pensieve-progress-text", text: "Starting index..." });
 		this.scrollToBottom();
 
-		await this.plugin.indexer.indexVault((status, current, total) => {
-			const pct = total > 0 ? (current / total) * 100 : 0;
-			progressFill.style.width = `${pct}%`;
-			progressText.setText(status);
+		await this.plugin.indexer.indexVault((status, cur, total) => {
+			fill.style.width = `${total > 0 ? (cur / total) * 100 : 0}%`;
+			label.setText(status);
 		});
-
-		// Update retriever's vector store reference
-		this.plugin.retriever.setVectorStore(
-			this.plugin.indexer.vectorStore
-		);
-
-		// Remove progress bar after a short delay
-		setTimeout(() => {
-			progressEl.remove();
-		}, 2000);
+		this.plugin.retriever.setVectorStore(this.plugin.indexer.vectorStore);
+		setTimeout(() => prog.remove(), 2000);
 	}
 
 	private scrollToBottom(): void {
-		requestAnimationFrame(() => {
-			this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
-		});
+		requestAnimationFrame(() => { this.chatContainer.scrollTop = this.chatContainer.scrollHeight; });
 	}
 }

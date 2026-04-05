@@ -11,7 +11,7 @@ Everything runs 100% locally and privately on your machine. No data is sent to t
 3. Pull the required models. Open your terminal and run:
    ```bash
    # Used for chat completions
-   ollama pull gemma3:4b
+   ollama pull gemma4:e2b
    
    # Used for vault embeddings (RAG)
    ollama pull nomic-embed-text
