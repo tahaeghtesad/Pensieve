@@ -4,7 +4,13 @@ import type { Tool, ToolContext, ToolResult } from "./types";
 // ── Helpers ──────────────────────────────────────────────────
 
 function normPath(p: string): string {
-	return p.endsWith(".md") ? p : p + ".md";
+	let clean = p.replace(/^\/+/, ""); // Strip leading slashes
+	return clean.endsWith(".md") ? clean : clean + ".md";
+}
+
+function joinPath(folder: string, file: string): string {
+	const cleanFolder = folder.replace(/^\/+/, "").replace(/\/+$/, "");
+	return cleanFolder ? `${cleanFolder}/${file}` : file;
 }
 
 async function ensureFolder(ctx: ToolContext, filePath: string): Promise<void> {
@@ -106,7 +112,7 @@ export const createDailyNoteTool: Tool = {
 		const prepend = Boolean(args["prepend"] ?? false);
 		const dateStr = new Date().toISOString().split("T")[0]!;
 		const folder = ctx.settings.dailyNoteFolder ?? "Daily";
-		const path = `${folder}/${dateStr}.md`;
+		const path = joinPath(folder, `${dateStr}.md`);
 		const existing = ctx.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFile) {
 			const old = await ctx.vault.cachedRead(existing);
@@ -134,7 +140,7 @@ export const createWeeklyNoteTool: Tool = {
 		const { year, week } = getISOWeek(new Date());
 		const weekStr = `W${String(week).padStart(2, "0")}`;
 		const folder = ctx.settings.weeklyNoteFolder ?? "Weekly";
-		const path = `${folder}/${year}-${weekStr}.md`;
+		const path = joinPath(folder, `${year}-${weekStr}.md`);
 		const existing = ctx.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFile) {
 			const old = await ctx.vault.cachedRead(existing);
