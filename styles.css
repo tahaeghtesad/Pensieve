@@ -206,90 +206,94 @@
 	margin: 0;
 }
 
-/* ── Message Bubbles ───────────────────────────────────────── */
+/* ── Message Bubbles (VS Code Copilot Style) ───────────────── */
 .pensieve-bubble {
-	margin-bottom: 16px;
+	display: flex;
+	gap: 12px;
+	margin-bottom: 24px;
 	animation: pensieve-slide-up 0.3s ease-out;
 }
 
-.pensieve-bubble-user {
+.pensieve-bubble-avatar {
+	flex-shrink: 0;
+	width: 24px;
+	height: 24px;
 	display: flex;
-	flex-direction: column;
-	align-items: flex-end;
+	align-items: center;
+	justify-content: center;
+	border-radius: 4px;
+	color: var(--pensieve-text-muted);
 }
 
-.pensieve-bubble-user .pensieve-bubble-content {
-	background: var(--pensieve-accent);
-	color: #fff;
-	border-radius: var(--pensieve-radius) var(--pensieve-radius) 4px var(--pensieve-radius);
-	padding: 10px 14px;
-	max-width: 85%;
-	word-wrap: break-word;
+.pensieve-bubble-assistant .pensieve-bubble-avatar {
+	color: var(--pensieve-accent);
+}
+
+.pensieve-bubble-avatar svg {
+	width: 18px;
+	height: 18px;
+}
+
+.pensieve-bubble-body {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.pensieve-bubble-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 2px;
+}
+
+.pensieve-bubble-name {
+	font-weight: 600;
+	font-size: 13px;
+	color: var(--text-normal);
+}
+
+.pensieve-bubble-content {
 	font-size: 13.5px;
-	line-height: 1.55;
-	box-shadow: 0 2px 8px var(--pensieve-accent-glow);
-	user-select: text;
-	-webkit-user-select: text;
-}
-
-.pensieve-bubble-assistant {
-	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
-}
-
-.pensieve-bubble-assistant .pensieve-bubble-content {
-	background: var(--pensieve-surface-alt);
+	line-height: 1.6;
 	color: var(--pensieve-text);
-	border-radius: var(--pensieve-radius) var(--pensieve-radius) var(--pensieve-radius) 4px;
-	padding: 10px 14px;
-	max-width: 92%;
-	word-wrap: break-word;
-	font-size: 13.5px;
-	line-height: 1.65;
-	border: 1px solid var(--pensieve-border);
 	user-select: text;
 	-webkit-user-select: text;
+	word-wrap: break-word;
 }
 
-/* Markdown content inside assistant bubbles */
-.pensieve-bubble-assistant .pensieve-bubble-content p {
-	margin: 0 0 8px;
+/* Markdown content inside bubbles */
+.pensieve-bubble-content p {
+	margin: 0 0 12px;
 }
 
-.pensieve-bubble-assistant .pensieve-bubble-content p:last-child {
+.pensieve-bubble-content p:last-child {
 	margin-bottom: 0;
 }
 
-.pensieve-bubble-assistant .pensieve-bubble-content pre {
+.pensieve-bubble-content pre {
 	margin: 8px 0;
 	border-radius: var(--pensieve-radius-sm);
 	overflow-x: auto;
 }
 
-.pensieve-bubble-assistant .pensieve-bubble-content code {
+.pensieve-bubble-content code {
 	font-size: 12px;
 }
 
-.pensieve-bubble-assistant .pensieve-bubble-content ul,
-.pensieve-bubble-assistant .pensieve-bubble-content ol {
+.pensieve-bubble-content ul,
+.pensieve-bubble-content ol {
 	margin: 4px 0;
 	padding-left: 20px;
 }
 
-.pensieve-bubble-assistant .pensieve-bubble-content blockquote {
+.pensieve-bubble-content blockquote {
 	margin: 8px 0;
 	padding-left: 12px;
 	border-left: 3px solid var(--pensieve-accent);
 	color: var(--pensieve-text-muted);
-}
-
-.pensieve-bubble-time {
-	font-size: 10px;
-	color: var(--pensieve-text-muted);
-	margin-top: 4px;
-	padding: 0 4px;
-	opacity: 0.6;
 }
 
 /* ── Source Citations ──────────────────────────────────────── */
@@ -347,35 +351,18 @@
 /* ── Typing Indicator ──────────────────────────────────────── */
 .pensieve-typing {
 	display: flex;
-	align-items: center;
-	gap: 5px;
-	padding: 12px 16px;
-	background: var(--pensieve-surface-alt);
-	border: 1px solid var(--pensieve-border);
-	border-radius: var(--pensieve-radius);
-	width: fit-content;
-	margin-bottom: 16px;
+	align-items: flex-start;
+	gap: 12px;
 	animation: pensieve-fade-in 0.3s ease-out;
 }
 
-.pensieve-typing-dot {
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	background: var(--pensieve-accent);
-	animation: pensieve-bounce 1.4s infinite ease-in-out both;
+.pensieve-typing .pensieve-bubble-name {
+	animation: pensieve-pulse 1.5s infinite;
 }
 
-.pensieve-typing-dot:nth-child(1) {
-	animation-delay: 0s;
-}
-
-.pensieve-typing-dot:nth-child(2) {
-	animation-delay: 0.16s;
-}
-
-.pensieve-typing-dot:nth-child(3) {
-	animation-delay: 0.32s;
+@keyframes pensieve-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.5; }
 }
 
 /* ── Progress Bar ──────────────────────────────────────────── */
@@ -609,7 +596,7 @@
 	animation: pensieve-fade-in 0.3s ease-out;
 }
 
-.pensieve-trace-toggle {
+.pensieve-trace-summary {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
@@ -622,9 +609,12 @@
 	color: var(--pensieve-text-muted);
 	cursor: pointer;
 	transition: all var(--pensieve-transition);
+	outline: none;
+	user-select: none;
+	-webkit-user-select: none;
 }
 
-.pensieve-trace-toggle:hover {
+.pensieve-trace-summary:hover {
 	border-color: var(--pensieve-accent);
 	color: var(--pensieve-accent);
 }

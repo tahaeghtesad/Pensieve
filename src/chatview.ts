@@ -184,7 +184,15 @@ export class PensieveChatView extends ItemView {
 
 	private appendMessageBubble(msg: ChatMessage): HTMLElement {
 		const bubble = this.chatContainer.createDiv({ cls: `pensieve-bubble pensieve-bubble-${msg.role}` });
-		const contentEl = bubble.createDiv({ cls: "pensieve-bubble-content" });
+		
+		const avatar = bubble.createDiv({ cls: "pensieve-bubble-avatar" });
+		setIcon(avatar, msg.role === "user" ? "user" : "bot");
+
+		const body = bubble.createDiv({ cls: "pensieve-bubble-body" });
+		const header = body.createDiv({ cls: "pensieve-bubble-header" });
+		header.createSpan({ cls: "pensieve-bubble-name", text: msg.role === "user" ? "You" : "Pensieve" });
+		
+		const contentEl = body.createDiv({ cls: "pensieve-bubble-content" });
 
 		if (msg.role === "assistant") {
 			MarkdownRenderer.render(this.app, msg.content || "...", contentEl, "", this);
@@ -192,17 +200,15 @@ export class PensieveChatView extends ItemView {
 			contentEl.createDiv({ cls: "pensieve-bubble-text", text: msg.content });
 		}
 
-		// Sources
+		// Sources & Affected Files
+		const meta = body.createDiv({ cls: "pensieve-bubble-meta" });
 		if (msg.sources && msg.sources.length > 0) {
-			this.renderFileList(bubble, msg.sources, "📎", "sources");
+			this.renderFileList(meta, msg.sources, "📎", "sources");
 		}
-
-		// Affected files (agent writes)
 		if (msg.affectedFiles && msg.affectedFiles.length > 0) {
-			this.renderFileList(bubble, msg.affectedFiles, "✏️", "affected");
+			this.renderFileList(meta, msg.affectedFiles, "✏️", "affected");
 		}
 
-		bubble.createDiv({ cls: "pensieve-bubble-time", text: new Date(msg.timestamp).toLocaleTimeString() });
 		return bubble;
 	}
 
@@ -224,12 +230,11 @@ export class PensieveChatView extends ItemView {
 		toggle.addEventListener("click", () => list.classList.toggle("hidden"));
 	}
 
-	// ── Trace UI ─────────────────────────────────────────────
-	private createTraceContainer(): { wrap: HTMLElement; list: HTMLElement; toggle: HTMLElement } {
-		const wrap = this.chatContainer.createDiv({ cls: "pensieve-trace" });
-		const toggle = wrap.createEl("button", { cls: "pensieve-trace-toggle", text: "⚙ Thinking…" });
-		const list = wrap.createDiv({ cls: "pensieve-trace-list hidden" });
-		toggle.addEventListener("click", () => list.classList.toggle("hidden"));
+	private createTraceContainer(): { wrap: HTMLDetailsElement; list: HTMLElement; toggle: HTMLElement } {
+		const wrap = this.chatContainer.createEl("details", { cls: "pensieve-trace-details pensieve-trace" }) as HTMLDetailsElement;
+		wrap.open = true; // Show reasoning automatically
+		const toggle = wrap.createEl("summary", { cls: "pensieve-trace-summary", text: "⚙ Pensieve's thought process..." });
+		const list = wrap.createDiv({ cls: "pensieve-trace-list" });
 		return { wrap, list, toggle };
 	}
 
@@ -259,10 +264,14 @@ export class PensieveChatView extends ItemView {
 
 	// ── Typing indicator ──────────────────────────────────────
 	private showTyping(): HTMLElement {
-		const el = this.chatContainer.createDiv({ cls: "pensieve-typing" });
-		el.createSpan({ cls: "pensieve-typing-dot" });
-		el.createSpan({ cls: "pensieve-typing-dot" });
-		el.createSpan({ cls: "pensieve-typing-dot" });
+		const el = this.chatContainer.createDiv({ cls: "pensieve-bubble pensieve-typing" });
+		const avatar = el.createDiv({ cls: "pensieve-bubble-avatar" });
+		setIcon(avatar, "bot");
+		
+		const body = el.createDiv({ cls: "pensieve-bubble-body" });
+		const header = body.createDiv({ cls: "pensieve-bubble-header" });
+		header.createSpan({ cls: "pensieve-bubble-name", text: "Pensieve is thinking..." });
+		
 		this.scrollToBottom();
 		return el;
 	}
@@ -342,7 +351,8 @@ export class PensieveChatView extends ItemView {
 
 				const result = await this.plugin.orchestrator.runAgent(intent, agentCtx);
 
-				// Update trace toggle label
+				// Update trace toggle label and collapse it
+				traceWrap.open = false;
 				traceToggle.setText(`⚙ Reasoning (${result.traceSteps.length} steps) — click to expand`);
 
 				// Render final answer bubble
