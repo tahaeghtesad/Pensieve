@@ -31,16 +31,31 @@ If you're not compiling from source, you can install the plugin manually:
 To compile the plugin yourself, you need Node.js installed.
 
 1. Clone or download this repository.
-2. Open a terminal in the folder and run:
+2. Install dependencies:
    ```bash
    npm install
    ```
-3. Build the plugin:
+3. Copy the config template and set your vault path:
    ```bash
-   npm run build
+   cp config.json.template config.json
    ```
-   *For development with hot-reloading (watch mode), run `npm run dev`.*
-4. Copy the freshly built `main.js`, `styles.css`, and `manifest.json` to your `.obsidian/plugins/pensieve/` folder.
+   Then open `config.json` and set `vaultPluginPath` to the plugin folder inside your vault:
+   ```json
+   {
+     "vaultPluginPath": "/Users/you/my-vault/.obsidian/plugins/pensieve"
+   }
+   ```
+   > `config.json` is git-ignored — your local path is never committed.
+
+4. Build **and** install directly into your vault in one step:
+   ```bash
+   npm run test
+   ```
+   This compiles TypeScript, bundles with esbuild, and copies `main.js`, `manifest.json`, and `styles.css` to the vault folder defined in `config.json`.
+
+5. Reload Obsidian (or re-enable the plugin) to pick up the new build.
+
+   *For development with hot-reloading (watch mode), run `npm run dev`, then manually copy the updated `main.js` to your vault.*
 
 ## How to Use
 
