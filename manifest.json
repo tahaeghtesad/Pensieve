@@ -1,0 +1,9 @@
+{
+	"id": "pensieve",
+	"name": "Pensieve",
+	"version": "1.0.0",
+	"minAppVersion": "1.0.0",
+	"description": "Local AI chat assistant with RAG — powered by Ollama and gemma. Ask questions about your vault with full context.",
+	"author": "Taha Eghtesad",
+	"isDesktopOnly": true
+}
