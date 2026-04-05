@@ -242,11 +242,16 @@ export class PensieveChatView extends ItemView {
 		const body = row.createDiv({ cls: "pensieve-trace-body" });
 
 		if (step.type === "tool_call" && step.toolName) {
-			body.createEl("strong", { text: step.toolName });
+			body.createEl("strong", { text: `Used tool: ${step.toolName}` });
 			if (step.toolArgs && Object.keys(step.toolArgs).length > 0) {
-				const args = body.createEl("pre", { cls: "pensieve-trace-args" });
+				const args = body.createEl("pre", { cls: "pensieve-trace-args selectable" });
 				args.createEl("code", { text: JSON.stringify(step.toolArgs, null, 2) });
 			}
+		} else if (step.type === "observation") {
+			const details = body.createEl("details", { cls: "pensieve-trace-details" });
+			details.createEl("summary", { text: "Tool Output" });
+			const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
+			MarkdownRenderer.render(this.app, step.content, contentDiv, "", this);
 		} else {
 			MarkdownRenderer.render(this.app, step.content, body, "", this);
 		}
@@ -283,7 +288,7 @@ export class PensieveChatView extends ItemView {
 			// RAG context (used by both paths)
 			const chunks = await this.plugin.retriever.retrieve(text);
 			const context = this.plugin.retriever.buildContext(chunks);
-			const sources = [...new Set(chunks.map((c) => c.filePath))];
+			const sources: string[] = Array.from(new Set(chunks.map((c: { filePath: string }) => c.filePath)));
 			const history = this.plugin.chatHistory.getOllamaHistory();
 			history.pop(); // will be added by buildMessages / agent
 
@@ -306,7 +311,7 @@ export class PensieveChatView extends ItemView {
 				const contentEl = bubble.querySelector(".pensieve-bubble-content") as HTMLElement;
 				let fullContent = "";
 
-				await this.plugin.ollama.chat(this.plugin.settings.chatModel, messages, (token) => {
+				await this.plugin.ollama.chat(this.plugin.settings.chatModel, messages, (token: string) => {
 					fullContent += token;
 					contentEl.empty();
 					MarkdownRenderer.render(this.app, fullContent, contentEl, "", this);
@@ -386,7 +391,7 @@ export class PensieveChatView extends ItemView {
 		const label = prog.createDiv({ cls: "pensieve-progress-text", text: "Starting index..." });
 		this.scrollToBottom();
 
-		await this.plugin.indexer.indexVault((status, cur, total) => {
+		await this.plugin.indexer.indexVault((status: string, cur: number, total: number) => {
 			fill.style.width = `${total > 0 ? (cur / total) * 100 : 0}%`;
 			label.setText(status);
 		});
