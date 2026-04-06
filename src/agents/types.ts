@@ -9,7 +9,9 @@ export type IntentType =
 	| "write_task"
 	| "plan_task"
 	| "review_task"
-	| "factcheck_task";
+	| "factcheck_task"
+	| "organize_task"
+	| "synthesize_task";
 
 export interface TraceStep {
 	type: "thought" | "tool_call" | "observation" | "agent_handoff" | "error";

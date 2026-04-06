@@ -5,6 +5,8 @@ import { WriterAgent } from "./writer";
 import { ReviewerAgent } from "./reviewer";
 import { CriticAgent } from "./critic";
 import { FactCheckerAgent } from "./factchecker";
+import { OrganizerAgent } from "./organizer";
+import { SynthesizerAgent } from "./synthesizer";
 import type { AgentContext, AgentResult, IntentType, ReActAgent } from "./types";
 
 const CLASSIFY_PROMPT = `You are a task classifier. Classify the user's request into exactly one category.
@@ -15,6 +17,8 @@ Categories:
 - plan_task: Complex multi-step planning, organizing goals, structuring projects
 - review_task: Reviewing, summarizing, evaluating, or analyzing note content
 - factcheck_task: Verifying facts, checking claims, validating information
+- organize_task: Restructuring the vault, moving files, renaming notes, building folders
+- synthesize_task: Extracting knowledge graphs, splitting notes into atomic concepts, tagging topics
 
 Respond with ONLY the category name. Nothing else.`;
 
@@ -31,6 +35,8 @@ export class Orchestrator {
 			["plan_task", new PlannerAgent()],
 			["review_task", new ReviewerAgent()],
 			["factcheck_task", new FactCheckerAgent()],
+			["organize_task", new OrganizerAgent()],
+			["synthesize_task", new SynthesizerAgent()],
 		]);
 	}
 
@@ -56,13 +62,15 @@ export class Orchestrator {
 		}
 
 		const raw = response.trim().toLowerCase().replace(/[^a-z_]/g, "");
-		const valid: IntentType[] = ["direct_chat", "write_task", "plan_task", "review_task", "factcheck_task"];
+		const valid: IntentType[] = ["direct_chat", "write_task", "plan_task", "review_task", "factcheck_task", "organize_task", "synthesize_task"];
 		if (valid.includes(raw as IntentType)) return raw as IntentType;
 
 		// Keyword fallback
 		const q = query.toLowerCase();
+		if (/(organize|move|rename|folder|restructure|architect|zettelkasten|para)/.test(q)) return "organize_task";
+		if (/(synthesize|atomic|split|extract|graph|topic|theme|concept)/.test(q)) return "synthesize_task";
 		if (/(create|add|write|append|update|edit|daily note|weekly note|jot down)/.test(q)) return "write_task";
-		if (/(plan|organize|break down|steps|roadmap|outline|structure)/.test(q)) return "plan_task";
+		if (/(plan|break down|steps|roadmap|outline|structure)/.test(q)) return "plan_task";
 		if (/(review|summarize|evaluate|assess|analyze|improve|feedback)/.test(q)) return "review_task";
 		if (/(fact.?check|verify|validate|confirm|is.*true|check.*claim)/.test(q)) return "factcheck_task";
 

@@ -205,6 +205,112 @@ export const openNoteTool: Tool = {
 	},
 };
 
+export const moveRenameNoteTool: Tool = {
+	name: "move_rename_note",
+	description: "Move or rename a note. This safely updates Wikipedia-style links across the entire vault automatically.",
+	parameters: [
+		{ name: "path", type: "string", description: "Current note path", required: true },
+		{ name: "new_path", type: "string", description: "New path/name for the note", required: true }
+	],
+	async execute(args, ctx): Promise<ToolResult> {
+		const path = normPath(String(args["path"] ?? ""));
+		const newPath = normPath(String(args["new_path"] ?? ""));
+		const file = ctx.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return { success: false, output: `Note not found: ${path}` };
+		if (ctx.vault.getAbstractFileByPath(newPath)) return { success: false, output: `Destination already exists: ${newPath}` };
+		
+		await ensureFolder(ctx, newPath);
+		await ctx.app.fileManager.renameFile(file, newPath);
+		return { success: true, output: `Successfully moved/renamed ${path} -> ${newPath}`, affectedFile: newPath };
+	}
+};
+
+export const archiveNoteTool: Tool = {
+	name: "archive_note",
+	description: "Archive a note safely instead of deleting it. Moves the note to the hidden .obsidian/archive folder.",
+	parameters: [{ name: "path", type: "string", description: "Path of the note to archive", required: true }],
+	async execute(args, ctx): Promise<ToolResult> {
+		const path = normPath(String(args["path"] ?? ""));
+		const file = ctx.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return { success: false, output: `Note not found: ${path}` };
+		
+		const destDir = ".obsidian/archive";
+		const destPath = `${destDir}/${file.name}`;
+		
+		const adapter = ctx.vault.adapter;
+		if (!(await adapter.exists(destDir))) {
+            await adapter.mkdir(destDir);
+		}
+		
+        let finalPath = destPath;
+        let counter = 1;
+        while (await adapter.exists(finalPath)) {
+            const spl = file.name.split(".");
+            const ext = spl.pop();
+            const base = spl.join(".");
+            finalPath = `${destDir}/${base}_${counter}.${ext}`;
+            counter++;
+        }
+        
+        const content = await adapter.read(file.path);
+        await adapter.write(finalPath, content);
+        await ctx.vault.delete(file);
+		
+		return { success: true, output: `Archived \`${path}\` to ${finalPath}.` };
+	}
+};
+
+export const updateFrontmatterTool: Tool = {
+	name: "update_frontmatter",
+	description: "Safely inject or update metadata properties (YAML frontmatter) in a note. Helpful for dynamically updating logical graph nodes and concepts.",
+	parameters: [
+		{ name: "path", type: "string", description: "Note path", required: true },
+		{ name: "properties", type: "string", description: "A stringified JSON map of keys and values to inject or overwrite. For example, '{\"logical_nodes\": [\"A\", \"B\"]}'.", required: true }
+	],
+	async execute(args, ctx): Promise<ToolResult> {
+		const path = normPath(String(args["path"] ?? ""));
+		const file = ctx.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return { success: false, output: `Note not found: ${path}` };
+		
+		let props: Record<string, unknown>;
+		try {
+			props = JSON.parse(String(args["properties"] ?? "{}"));
+		} catch {
+			return { success: false, output: "Properties must be a valid JSON string." };
+		}
+
+		await ctx.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+			for (const [k, v] of Object.entries(props)) {
+				fm[k] = v;
+			}
+		});
+		return { success: true, output: `Updated properties for \`${path}\`.`, affectedFile: path };
+	}
+};
+
+export const getKnowledgeGraphTool: Tool = {
+	name: "get_knowledge_graph",
+	description: "Scan the entire vault and aggregate meta knowledge-graph nodes from note frontmatter.",
+	parameters: [],
+	async execute(args, ctx): Promise<ToolResult> {
+		const files = ctx.vault.getMarkdownFiles();
+		const graph: Record<string, unknown> = {};
+		
+		for (const f of files) {
+			const cache = ctx.app.metadataCache.getFileCache(f);
+			if (cache && cache.frontmatter) {
+				// Clone to avoid mutation and strip raw Position data
+				const copy = { ...cache.frontmatter };
+				delete copy.position;
+				graph[f.path] = copy;
+			}
+		}
+		
+		if (Object.keys(graph).length === 0) return { success: true, output: "No frontmatter properties found in the vault." };
+		return { success: true, output: JSON.stringify(graph, null, 2) };
+	}
+};
+
 export function registerAllTools(registry: import("./registry").ToolRegistry): void {
 	registry.register(readNoteTool);
 	registry.register(writeNoteTool);
@@ -215,4 +321,8 @@ export function registerAllTools(registry: import("./registry").ToolRegistry): v
 	registry.register(listNotesTool);
 	registry.register(searchVaultTool);
 	registry.register(openNoteTool);
+	registry.register(moveRenameNoteTool);
+	registry.register(archiveNoteTool);
+	registry.register(updateFrontmatterTool);
+	registry.register(getKnowledgeGraphTool);
 }
