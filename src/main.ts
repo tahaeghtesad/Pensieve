@@ -14,8 +14,11 @@ import { registerAllTools } from "./tools/notetools";
 import { registerWebTools } from "./tools/webtools";
 import { registerMemoryTools } from "./tools/memorytools";
 import { registerAgentTools } from "./tools/agent_tools";
+import { registerDiscoveryTools } from "./tools/discovery_tools";
+import { registerGraphTools } from "./tools/graph_tools";
 import { Orchestrator } from "./agents/orchestrator";
 import { MemoryCompactor } from "./compactor";
+import { GraphStore } from "./graphstore";
 import type { ToolContext } from "./tools/types";
 import type { IntentType } from "./agents/types";
 
@@ -34,6 +37,7 @@ export default class PensievePlugin extends Plugin {
 	toolCtx!: ToolContext;
 	orchestrator!: Orchestrator;
 	compactor!: MemoryCompactor;
+	graphStore!: GraphStore;
 	private view: PensieveChatView | null = null;
 
 	async onload(): Promise<void> {
@@ -49,6 +53,10 @@ export default class PensievePlugin extends Plugin {
 		await this.indexer.loadIndex();
 		this.retriever.setVectorStore(this.indexer.vectorStore);
 
+		// GraphStore initialized natively
+		this.graphStore = new GraphStore(this.app.vault.adapter);
+		await this.graphStore.load();
+
 		// Tool system
 		this.toolRegistry = new ToolRegistry();
 		this.toolCtx = {
@@ -57,6 +65,7 @@ export default class PensievePlugin extends Plugin {
 			retriever: this.retriever,
 			settings: this.settings,
 			ollama: this.ollama,
+			graphStore: this.graphStore,
 			subAgentRunner: {
 				runSubAgent: async (intent: string, query: string, onTrace?: (step: any) => void) => {
 					if (!this.orchestrator) throw new Error("Orchestrator not initialized");
@@ -93,6 +102,8 @@ export default class PensievePlugin extends Plugin {
 		registerWebTools(this.toolRegistry);
 		registerMemoryTools(this.toolRegistry);
 		registerAgentTools(this.toolRegistry);
+		registerDiscoveryTools(this.toolRegistry);
+		registerGraphTools(this.toolRegistry);
 
 		// Orchestrator & Compactor
 		this.orchestrator = new Orchestrator(this.ollama, this.settings);

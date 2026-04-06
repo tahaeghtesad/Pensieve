@@ -6,8 +6,9 @@ import { ReviewerAgent } from "./reviewer";
 import { CriticAgent } from "./critic";
 import { FactCheckerAgent } from "./factchecker";
 import { OrganizerAgent } from "./organizer";
-import { SynthesizerAgent } from "./synthesizer";
+import { OntologistAgent } from "./ontologist";
 import { ArchivistAgent } from "./archivist";
+import { ExplorerAgent } from "./explorer";
 import type { AgentContext, AgentResult, IntentType, ReActAgent } from "./types";
 
 const CLASSIFY_PROMPT = `You are a task classifier. Classify the user's request into exactly one category.
@@ -21,6 +22,7 @@ Categories:
 - organize_task: Restructuring the vault, organizing notes, moving files, renaming, building folders
 - synthesize_task: Extracting knowledge graphs, splitting notes into atomic concepts, tagging topics
 - archive_task: Compressing old notes into memory nodes, temporal context extraction, memory decay operations
+- explore_task: Brainstorming, analyzing graph structure, finding disconnected concepts, generating research angles
 
 Respond with ONLY the category name. Nothing else.`;
 
@@ -38,8 +40,9 @@ export class Orchestrator {
 			["review_task", new ReviewerAgent()],
 			["factcheck_task", new FactCheckerAgent()],
 			["organize_task", new OrganizerAgent()],
-			["synthesize_task", new SynthesizerAgent()],
-			["archive_task", new ArchivistAgent()]
+			["synthesize_task", new OntologistAgent()],
+			["archive_task", new ArchivistAgent()],
+			["explore_task", new ExplorerAgent()]
 		]);
 	}
 
@@ -65,11 +68,12 @@ export class Orchestrator {
 		}
 
 		const raw = response.trim().toLowerCase().replace(/[^a-z_]/g, "");
-		const valid: IntentType[] = ["direct_chat", "write_task", "plan_task", "review_task", "factcheck_task", "organize_task", "synthesize_task", "archive_task"];
+		const valid: IntentType[] = ["direct_chat", "write_task", "plan_task", "review_task", "factcheck_task", "organize_task", "synthesize_task", "archive_task", "explore_task"];
 		if (valid.includes(raw as IntentType)) return raw as IntentType;
 
 		// Keyword fallback
 		const q = query.toLowerCase();
+		if (/(explore|discover|brainstorm|gap|structural hole|connect idea|new angle|research angle|novelty)/.test(q)) return "explore_task";
 		if (/(compress|consolidate|archive|memory|temporal|decay|old notes)/.test(q)) return "archive_task";
 		if (/(organize|move|rename|folder|restructure|architect|zettelkasten|para)/.test(q)) return "organize_task";
 		if (/(synthesize|atomic|split|extract|graph|topic|theme|concept)/.test(q)) return "synthesize_task";

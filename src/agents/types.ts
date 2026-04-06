@@ -12,7 +12,8 @@ export type IntentType =
 	| "factcheck_task"
 	| "organize_task"
 	| "synthesize_task"
-	| "archive_task";
+	| "archive_task"
+	| "explore_task";
 
 export interface TraceStep {
 	type: "thought" | "tool_call" | "observation" | "agent_handoff" | "error" | "prompt" | "raw_response";

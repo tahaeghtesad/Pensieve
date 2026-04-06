@@ -2,6 +2,7 @@ import type { App, Vault } from "obsidian";
 import type { Retriever } from "../retriever";
 import type { PensieveSettings } from "../settings";
 import type { OllamaService } from "../ollama";
+import type { GraphStore } from "../graphstore";
 
 export interface ToolParam {
 	name: string;
@@ -21,6 +22,7 @@ export interface ToolContext {
 	settings: PensieveSettings;
 	ollama: OllamaService;
 	subAgentRunner?: SubAgentRunner;
+	graphStore?: GraphStore;
 }
 
 export interface ToolResult {
