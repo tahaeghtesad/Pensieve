@@ -64,16 +64,39 @@ ${rawText}`;
 		
 		const safeTitle = session.title.replace(/[^a-zA-Z0-9 _-]/g, "").trim() || "chat";
 		const filePath = normalizePath(`${memDir}/session_${session.id}_${safeTitle}.md`);
+		const summarizedAt = new Date().toISOString();
+		const sequenceId = session.temporalSequence ?? session.messages.length;
 		
 		const content = `---
 type: chat_memory
 session_id: ${session.id}
-date: ${new Date(session.createdAt).toISOString()}
+created_at: ${new Date(session.createdAt).toISOString()}
+updated_at: ${new Date(session.updatedAt).toISOString()}
+event_time: ${summarizedAt}
+sequence_id: ${sequenceId}
+source_intent: archive_task
+source_agent: compactor
+source_tools:
+  - memory_compactor
+format_version: md-wiki-temporal-v1
+migration_version: 1
+tags:
+  - pensieve/managed
+  - pensieve/chat-memory
 ---
 # Chat Session: ${session.title}
 
 ## Summary
 ${session.summary}
+
+## Chronology
+- ${summarizedAt} | seq:${sequenceId} | event:compaction | agent:compactor | tool:memory_compactor
+
+## Related Notes
+- [[Timeline]]
+
+## Change Log
+- ${summarizedAt} | compacted session memory (seq:${sequenceId})
 `;
 		
 		const file = this.vault.getAbstractFileByPath(filePath);

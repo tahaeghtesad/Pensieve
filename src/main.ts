@@ -10,12 +10,13 @@ import { Retriever } from "./retriever";
 import { ChatHistoryManager, ChatHistoryData } from "./chathistory";
 import { PensieveChatView, VIEW_TYPE_PENSIEVE_CHAT } from "./chatview";
 import { ToolRegistry } from "./tools/registry";
-import { registerAllTools } from "./tools/notetools";
+import { migrateManagedMarkdownNotes, registerAllTools } from "./tools/notetools";
 import { registerWebTools } from "./tools/webtools";
 import { registerMemoryTools } from "./tools/memorytools";
 import { registerAgentTools } from "./tools/agent_tools";
 import { registerDiscoveryTools } from "./tools/discovery_tools";
 import { registerGraphTools } from "./tools/graph_tools";
+import { registerMaintenanceTools } from "./tools/maintenancetools";
 import { Orchestrator } from "./agents/orchestrator";
 import { MemoryCompactor } from "./compactor";
 import { GraphStore } from "./graphstore";
@@ -66,6 +67,13 @@ export default class PensievePlugin extends Plugin {
 			settings: this.settings,
 			ollama: this.ollama,
 			graphStore: this.graphStore,
+			temporalContext: {
+				sessionId: this.chatHistory.getActiveSession().id,
+				intent: "direct_chat",
+				agentName: "direct_chat",
+				eventType: "chat",
+			},
+			nextTemporalSequence: () => this.chatHistory.nextTemporalSequence(),
 			subAgentRunner: {
 				runSubAgent: async (intent: string, query: string, onTrace?: (step: any) => void) => {
 					if (!this.orchestrator) throw new Error("Orchestrator not initialized");
@@ -104,6 +112,7 @@ export default class PensievePlugin extends Plugin {
 		registerAgentTools(this.toolRegistry);
 		registerDiscoveryTools(this.toolRegistry);
 		registerGraphTools(this.toolRegistry);
+		registerMaintenanceTools(this.toolRegistry);
 
 		// Orchestrator & Compactor
 		this.orchestrator = new Orchestrator(this.ollama, this.settings);
@@ -121,6 +130,14 @@ export default class PensievePlugin extends Plugin {
 			callback: async () => {
 				await this.indexer.indexVault();
 				this.retriever.setVectorStore(this.indexer.vectorStore);
+			},
+		});
+		this.addCommand({
+			id: "migrate-temporal-wiki-notes",
+			name: "Migrate notes to temporal wiki format",
+			callback: async () => {
+				const report = await migrateManagedMarkdownNotes(this.toolCtx);
+				console.log(`[Pensieve] Temporal wiki migration complete: scanned=${report.scanned}, migrated=${report.migrated}, skipped=${report.skipped}`);
 			},
 		});
 

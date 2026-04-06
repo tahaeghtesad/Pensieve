@@ -5,7 +5,7 @@ import {
 	setIcon,
 	TFile,
 } from "obsidian";
-import type PensievePlugin from "./main";
+import type { default as PensievePlugin } from "./main";
 import type { ChatMessage } from "./chathistory";
 import type { AgentContext, TraceStep } from "./agents/types";
 
@@ -75,13 +75,19 @@ export class PensieveChatView extends ItemView {
 		this.textInput.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.onSend(); }
 		});
-		this.sendBtn.addEventListener("click", () => this.onSend());
+		this.sendBtn.addEventListener("click", () => {
+			if (this.isGenerating) {
+				if (this.abortSignal) this.abortSignal.aborted = true;
+				return;
+			}
+			this.onSend().catch(e => console.error(e));
+		});
 
 		this.renderAllMessages();
 		this.checkOllamaStatus();
 	}
 
-	async onClose(): Promise<void> { this.abortSignal.aborted = true; }
+	async onClose(): Promise<void> { if (this.abortSignal) this.abortSignal.aborted = true; }
 
 	// ── Status ────────────────────────────────────────────────
 	private async checkOllamaStatus(): Promise<void> {
@@ -159,10 +165,19 @@ export class PensieveChatView extends ItemView {
 				});
 				const del = item.createEl("button", { cls: "pensieve-session-delete", attr: { "aria-label": "Delete" } });
 				setIcon(del, "trash-2");
-				del.addEventListener("click", (e) => {
+				del.addEventListener("click", async (e) => {
 					e.stopPropagation();
 					this.plugin.chatHistory.deleteSession(s.id);
 					this.plugin.saveChatHistory();
+					
+					const fp = `.pensieve/chat_memories/session-${s.id}.md`;
+					if (await this.app.vault.adapter.exists(fp)) {
+						await this.app.vault.adapter.remove(fp);
+					}
+					
+					if (this.plugin.chatHistory.getActiveSession()?.id !== s.id) {
+					    this.renderAllMessages();
+					}
 					renderItems(searchInput.value);
 				});
 			}
@@ -176,6 +191,7 @@ export class PensieveChatView extends ItemView {
 	private renderAllMessages(): void {
 		this.chatContainer.empty();
 		const session = this.plugin.chatHistory.getActiveSession();
+		if (!session) { this.renderWelcome(); return; }
 		if (session.messages.length === 0) { this.renderWelcome(); return; }
 		for (const msg of session.messages) {
 			if (msg.role === "system") continue;
@@ -312,13 +328,22 @@ export class PensieveChatView extends ItemView {
 
 		this.isGenerating = true;
 		this.abortSignal = { aborted: false };
-		this.sendBtn.classList.add("disabled");
+		setIcon(this.sendBtn, "square");
+		this.sendBtn.setAttribute("aria-label", "Stop");
+		
 		this.textInput.value = "";
 		this.textInput.style.height = "auto";
 
 		const userMsg: ChatMessage = { role: "user", content: text, timestamp: Date.now() };
 		this.plugin.chatHistory.addMessage(userMsg);
 		this.appendMessageBubble(userMsg);
+		const activeSession = this.plugin.chatHistory.getActiveSession();
+		this.plugin.toolCtx.temporalContext = {
+			sessionId: activeSession.id,
+			intent: "direct_chat",
+			agentName: "direct_chat",
+			eventType: "chat",
+		};
 
 		const typing = this.showTyping();
 		
@@ -346,12 +371,18 @@ export class PensieveChatView extends ItemView {
 			// Classify intent
 			this.appendTraceStep({ type: "observation", content: "Analyzing task intent & routing..." }, traceList);
 			this.scrollToBottom();
-			const intent = await this.plugin.orchestrator.classify(text);
+			const intent = await this.plugin.orchestrator.classify(text, this.abortSignal);
 			
 			this.appendTraceStep({ type: "agent_handoff", content: `Routed to **${intent}**` }, traceList);
 			this.scrollToBottom();
 
 			if (intent === "direct_chat") {
+				this.plugin.toolCtx.temporalContext = {
+					sessionId: activeSession.id,
+					intent,
+					agentName: "direct_chat",
+					eventType: "chat",
+				};
 				traceWrap.open = false; // Hide trace container for simple chat
 				traceToggle.setText(`⚙ System Trace (${traceList.children.length} steps) — click to expand`);
 				
@@ -384,6 +415,12 @@ export class PensieveChatView extends ItemView {
 
 			} else {
 				// ── Agentic path ─────────────────────────────────
+				this.plugin.toolCtx.temporalContext = {
+					sessionId: activeSession.id,
+					intent,
+					agentName: intent,
+					eventType: "agent_run",
+				};
 				typing.remove();
 				// Trace container already created and open; we just keep appending to it!
 
@@ -395,6 +432,7 @@ export class PensieveChatView extends ItemView {
 					toolRegistry: this.plugin.toolRegistry,
 					ollama: this.plugin.ollama,
 					settings: this.plugin.settings,
+					abortSignal: this.abortSignal,
 					onTrace: (step: TraceStep) => {
 						this.appendTraceStep(step, traceList);
 						this.scrollToBottom();
@@ -443,7 +481,8 @@ export class PensieveChatView extends ItemView {
 			this.appendMessageBubble(errMsg);
 		} finally {
 			this.isGenerating = false;
-			this.sendBtn.classList.remove("disabled");
+			setIcon(this.sendBtn, "send");
+			this.sendBtn.setAttribute("aria-label", "Send");
 			this.scrollToBottom();
 			this.plugin.saveChatHistory();
 		}

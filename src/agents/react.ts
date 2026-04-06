@@ -51,10 +51,14 @@ export async function runReActLoop(
 	});
 
 	for (let iter = 0; iter < maxIterations; iter++) {
+		if (ctx.abortSignal?.aborted) {
+			onTrace({ type: "observation", content: "Generation explicitly aborted." });
+			return { answer: "Generation aborted by user.", traceSteps, affectedFiles: Array.from(affectedFiles) };
+		}
 		let responseText = "";
 		await ollama.chat(settings.chatModel, messages, (token) => {
 			responseText += token;
-		});
+		}, ctx.abortSignal);
 
 		// Emit thought
 		const thought = toolRegistry.parseThought(responseText);

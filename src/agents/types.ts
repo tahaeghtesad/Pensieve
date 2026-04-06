@@ -13,7 +13,10 @@ export type IntentType =
 	| "organize_task"
 	| "synthesize_task"
 	| "archive_task"
-	| "explore_task";
+	| "explore_task"
+	| "govern_task"
+	| "ingest_url"
+	| "garden_task";
 
 export interface TraceStep {
 	type: "thought" | "tool_call" | "observation" | "agent_handoff" | "error" | "prompt" | "raw_response";
@@ -37,6 +40,7 @@ export interface AgentContext {
 	ollama: OllamaService;
 	settings: PensieveSettings;
 	onTrace: (step: TraceStep) => void;
+	abortSignal?: { aborted: boolean };
 }
 
 export abstract class ReActAgent {

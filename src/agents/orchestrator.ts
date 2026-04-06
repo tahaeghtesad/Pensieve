@@ -9,6 +9,9 @@ import { OrganizerAgent } from "./organizer";
 import { OntologistAgent } from "./ontologist";
 import { ArchivistAgent } from "./archivist";
 import { ExplorerAgent } from "./explorer";
+import { GovernorAgent } from "./governor";
+import { ResearcherAgent } from "./researcher";
+import { VaultGardenerAgent } from "./gardener";
 import type { AgentContext, AgentResult, IntentType, ReActAgent } from "./types";
 
 const CLASSIFY_PROMPT = `You are a task classifier. Classify the user's request into exactly one category.
@@ -23,6 +26,9 @@ Categories:
 - synthesize_task: Extracting knowledge graphs, splitting notes into atomic concepts, tagging topics
 - archive_task: Compressing old notes into memory nodes, temporal context extraction, memory decay operations
 - explore_task: Brainstorming, analyzing graph structure, finding disconnected concepts, generating research angles
+- govern_task: Enforcing strict markdown/wiki format, temporal schema compliance, and migration of legacy notes
+- ingest_url: Reading a URL/link, researching a webpage, ingesting an article, "read this link", deep-diving into a web resource
+- garden_task: Vault cleanup, fixing orphan notes, linting frontmatter, deduplication, structural health checks
 
 Respond with ONLY the category name. Nothing else.`;
 
@@ -42,7 +48,10 @@ export class Orchestrator {
 			["organize_task", new OrganizerAgent()],
 			["synthesize_task", new OntologistAgent()],
 			["archive_task", new ArchivistAgent()],
-			["explore_task", new ExplorerAgent()]
+			["explore_task", new ExplorerAgent()],
+			["govern_task", new GovernorAgent()],
+			["ingest_url", new ResearcherAgent()],
+			["garden_task", new VaultGardenerAgent()]
 		]);
 	}
 
@@ -50,8 +59,15 @@ export class Orchestrator {
 		this.settings = settings;
 	}
 
-	async classify(query: string): Promise<IntentType> {
+	async classify(query: string, abortSignal?: { aborted: boolean }): Promise<IntentType> {
 		if (!this.settings.agentEnabled) return "direct_chat";
+
+		// ── Fast-path: URL detection routes immediately to Researcher ──
+		const urlPattern = /https?:\/\/[^\s]+/i;
+		const urlKeywords = /(read this link|read this url|ingest this|read this page|summarize this link|research this url|research this link)/i;
+		if (urlPattern.test(query) || urlKeywords.test(query)) {
+			return "ingest_url";
+		}
 
 		let response = "";
 		try {
@@ -61,20 +77,23 @@ export class Orchestrator {
 					{ role: "system", content: CLASSIFY_PROMPT },
 					{ role: "user", content: query },
 				],
-				(token) => { response += token; }
+				(token) => { response += token; },
+				abortSignal
 			);
 		} catch {
 			return "direct_chat";
 		}
 
 		const raw = response.trim().toLowerCase().replace(/[^a-z_]/g, "");
-		const valid: IntentType[] = ["direct_chat", "write_task", "plan_task", "review_task", "factcheck_task", "organize_task", "synthesize_task", "archive_task", "explore_task"];
+		const valid: IntentType[] = ["direct_chat", "write_task", "plan_task", "review_task", "factcheck_task", "organize_task", "synthesize_task", "archive_task", "explore_task", "govern_task", "ingest_url", "garden_task"];
 		if (valid.includes(raw as IntentType)) return raw as IntentType;
 
 		// Keyword fallback
 		const q = query.toLowerCase();
+		if (/(markdown format|wiki format|frontmatter|temporal schema|chronology|migrate notes|normalize tags|strict format)/.test(q)) return "govern_task";
 		if (/(explore|discover|brainstorm|gap|structural hole|connect idea|new angle|research angle|novelty)/.test(q)) return "explore_task";
 		if (/(compress|consolidate|archive|memory|temporal|decay|old notes)/.test(q)) return "archive_task";
+		if (/(garden|lint|orphan|cleanup|clean up|deduplic|vault health|fix links|broken links|reparent)/.test(q)) return "garden_task";
 		if (/(organize|move|rename|folder|restructure|architect|zettelkasten|para)/.test(q)) return "organize_task";
 		if (/(synthesize|atomic|split|extract|graph|topic|theme|concept)/.test(q)) return "synthesize_task";
 		if (/(create|add|write|append|update|edit|daily note|weekly note|jot down)/.test(q)) return "write_task";

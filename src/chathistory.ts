@@ -7,6 +7,7 @@ export interface ChatMessage {
 	sources?: string[];
 	affectedFiles?: string[];
 	timestamp: number;
+	sequenceId?: number;
 }
 
 /** A named chat session. */
@@ -18,6 +19,7 @@ export interface ChatSession {
 	updatedAt: number;
 	summary?: string;
 	summaryIteration?: number;
+	temporalSequence?: number;
 }
 
 /** Persistent data shape saved via plugin.saveData(). */
@@ -69,6 +71,7 @@ export class ChatHistoryManager {
 			messages: [],
 			createdAt: now,
 			updatedAt: now,
+			temporalSequence: 0,
 		};
 		this.sessions.unshift(session);
 		this.activeSessionId = session.id;
@@ -87,6 +90,10 @@ export class ChatHistoryManager {
 	/** Add a message to the active session. */
 	addMessage(msg: ChatMessage): void {
 		const session = this.getActiveSession();
+		if (typeof msg.sequenceId !== "number") {
+			session.temporalSequence = (session.temporalSequence ?? 0) + 1;
+			msg.sequenceId = session.temporalSequence;
+		}
 		session.messages.push(msg);
 		session.updatedAt = Date.now();
 
@@ -101,6 +108,14 @@ export class ChatHistoryManager {
 					? msg.content.slice(0, 57) + "..."
 					: msg.content;
 		}
+	}
+
+	/** Monotonic temporal sequence for ordering events in the active session. */
+	nextTemporalSequence(): number {
+		const session = this.getActiveSession();
+		session.temporalSequence = (session.temporalSequence ?? 0) + 1;
+		session.updatedAt = Date.now();
+		return session.temporalSequence;
 	}
 
 	/** Update the last assistant message content (for streaming). */

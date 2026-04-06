@@ -83,7 +83,54 @@ export const readWebpageTool: Tool = {
 	}
 };
 
+export const queryWikipediaTool: Tool = {
+	name: "query_wikipedia",
+	description: "Fetch a clean, dense summary of a topic from Wikipedia. Use this as a 'source of truth' to ground and cross-reference information from other web sources.",
+	parameters: [{ name: "topic", type: "string", description: "The topic or entity to look up on Wikipedia (e.g. 'GraphRAG', 'Transformer (machine learning model)')", required: true }],
+	async execute(args, _ctx): Promise<ToolResult> {
+		const topic = String(args["topic"] ?? "").trim();
+		if (!topic) return { success: false, output: "A topic is required." };
+		try {
+			const apiUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&redirects=1&format=json&titles=${encodeURIComponent(topic)}`;
+			const res = await requestUrl({
+				url: apiUrl,
+				headers: {
+					"User-Agent": "PensieveObsidianPlugin/1.0 (https://github.com/pensieve; research-agent)",
+					"Accept": "application/json"
+				}
+			});
+			const data = res.json;
+			const pages = data?.query?.pages;
+			if (!pages) return { success: false, output: "Wikipedia API returned an unexpected response." };
+
+			const pageId = Object.keys(pages)[0];
+			if (!pageId || pageId === "-1") {
+				return { success: true, output: `No Wikipedia article found for "${topic}". Try a different search term or use search_web instead.` };
+			}
+
+			const page = pages[pageId];
+			const title = page.title ?? topic;
+			const extract = page.extract ?? "";
+
+			if (!extract || extract.trim().length === 0) {
+				return { success: true, output: `Wikipedia article "${title}" exists but has no introductory extract. Try search_web for more information.` };
+			}
+
+			// Truncate very long extracts to protect context window
+			const content = extract.length > 5000 ? extract.slice(0, 5000) + "\n\n...[Extract truncated]" : extract;
+
+			return {
+				success: true,
+				output: `# Wikipedia: ${title}\n\n${content}\n\n---\nSource: https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`
+			};
+		} catch (e) {
+			return { success: false, output: `Wikipedia query failed: ${e}` };
+		}
+	}
+};
+
 export function registerWebTools(registry: import("./registry").ToolRegistry): void {
 	registry.register(searchWebTool);
 	registry.register(readWebpageTool);
+	registry.register(queryWikipediaTool);
 }

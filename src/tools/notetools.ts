@@ -32,6 +32,140 @@ function getISOWeek(date: Date): { year: number; week: number } {
 	return { year: d.getUTCFullYear(), week };
 }
 
+const FORMAT_VERSION = "md-wiki-temporal-v1";
+
+function splitFrontmatter(raw: string): { frontmatter: string; body: string } {
+	const normalized = raw.replace(/\r\n/g, "\n");
+	const match = normalized.match(/^---\n([\s\S]*?)\n---\n?/);
+	if (!match || typeof match[0] !== "string") return { frontmatter: "", body: normalized };
+	const body = normalized.slice(match[0].length);
+	return { frontmatter: match[0], body };
+}
+
+function normalizeTags(value: unknown): string[] {
+	let tags: string[] = [];
+	if (Array.isArray(value)) {
+		tags = value.map((v) => String(v));
+	} else if (typeof value === "string") {
+		tags = value.split(/[\s,]+/g);
+	}
+	const normalized = tags
+		.map((tag) => tag.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase())
+		.filter((tag) => tag.length > 0);
+	if (!normalized.includes("pensieve/managed")) normalized.push("pensieve/managed");
+	return Array.from(new Set(normalized));
+}
+
+function hasSection(body: string, title: string): boolean {
+	const sectionRe = new RegExp(`^##\\s+${title}\\s*$`, "m");
+	return sectionRe.test(body);
+}
+
+function ensureStrictMarkdownWikiBody(body: string): string {
+	let out = body.trim();
+	if (!hasSection(out, "Summary")) {
+		const summary = out.length > 0 ? out : "Pending summary.";
+		out = `## Summary\n${summary}`;
+	}
+	if (!hasSection(out, "Chronology")) {
+		out += "\n\n## Chronology\n";
+	}
+	if (!hasSection(out, "Related Notes")) {
+		out += "\n\n## Related Notes\n- [[Timeline]]";
+	}
+	if (!hasSection(out, "Change Log")) {
+		out += "\n\n## Change Log\n- Initialized managed note format.";
+	}
+	if (!/\[\[[^\]]+\]\]/.test(out)) {
+		out += "\n\n## Related Notes\n- [[Timeline]]";
+	}
+	return out.trimEnd() + "\n";
+}
+
+function appendLineToSection(body: string, section: string, line: string): string {
+	const normalized = body.replace(/\r\n/g, "\n");
+	const lines = normalized.split("\n");
+	const header = `## ${section}`;
+	const idx = lines.findIndex((l) => l.trim() === header);
+	if (idx < 0) return normalized;
+	if (lines.some((l) => l.trim() === line.trim())) return normalized;
+
+	let insertAt = lines.length;
+	for (let i = idx + 1; i < lines.length; i++) {
+		if (/^##\s+/.test(lines[i] ?? "")) {
+			insertAt = i;
+			break;
+		}
+	}
+	lines.splice(insertAt, 0, line);
+	return lines.join("\n");
+}
+
+async function enforceTemporalManagedFile(path: string, ctx: ToolContext, eventType: string): Promise<ToolResult> {
+	const file = ctx.vault.getAbstractFileByPath(path);
+	if (!(file instanceof TFile)) return { success: false, output: `Note not found: ${path}` };
+
+	const eventTime = new Date().toISOString();
+	const sequenceId = ctx.nextTemporalSequence ? ctx.nextTemporalSequence() : Date.now();
+	const sourceAgent = ctx.temporalContext?.agentName ?? ctx.temporalContext?.intent ?? "direct_chat";
+	const sourceIntent = ctx.temporalContext?.intent ?? "direct_chat";
+	const sourceTool = ctx.currentToolName ?? eventType;
+
+	await ctx.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+		fm["created_at"] = typeof fm["created_at"] === "string" ? fm["created_at"] : eventTime;
+		fm["updated_at"] = eventTime;
+		fm["event_time"] = eventTime;
+		fm["sequence_id"] = sequenceId;
+		fm["source_session_id"] = ctx.temporalContext?.sessionId ?? "unknown";
+		fm["source_intent"] = sourceIntent;
+		fm["source_agent"] = sourceAgent;
+		fm["source_tools"] = [sourceTool];
+		fm["format_version"] = FORMAT_VERSION;
+		fm["migration_version"] = 1;
+		fm["tags"] = normalizeTags(fm["tags"]);
+	});
+
+	const raw = await ctx.vault.cachedRead(file);
+	const split = splitFrontmatter(raw);
+	let normalizedBody = ensureStrictMarkdownWikiBody(split.body);
+	normalizedBody = appendLineToSection(
+		normalizedBody,
+		"Chronology",
+		`- ${eventTime} | seq:${sequenceId} | event:${eventType} | agent:${sourceAgent} | tool:${sourceTool}`
+	);
+	normalizedBody = appendLineToSection(
+		normalizedBody,
+		"Change Log",
+		`- ${eventTime} | ${eventType} (seq:${sequenceId})`
+	);
+	await ctx.vault.modify(file, `${split.frontmatter}${normalizedBody}`);
+
+	return {
+		success: true,
+		output: `Updated temporal wiki format for \`${path}\` (seq ${sequenceId}).`,
+		affectedFile: path,
+	};
+}
+
+export interface MigrationReport {
+	scanned: number;
+	migrated: number;
+	skipped: number;
+}
+
+export async function migrateManagedMarkdownNotes(ctx: ToolContext, folder?: string): Promise<MigrationReport> {
+	const files = ctx.vault.getMarkdownFiles().filter((f) => !f.path.startsWith(".obsidian/"));
+	const scoped = folder ? files.filter((f) => f.path.startsWith(folder)) : files;
+	let migrated = 0;
+	let skipped = 0;
+	for (const file of scoped) {
+		const result = await enforceTemporalManagedFile(file.path, ctx, "migration");
+		if (result.success) migrated++;
+		else skipped++;
+	}
+	return { scanned: scoped.length, migrated, skipped };
+}
+
 // ── Tools ─────────────────────────────────────────────────────
 
 export const readNoteTool: Tool = {
@@ -60,7 +194,9 @@ export const writeNoteTool: Tool = {
 		const file = ctx.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return { success: false, output: `Note not found: ${path}` };
 		await ctx.vault.modify(file, content);
-		return { success: true, output: `Updated \`${path}\``, affectedFile: path };
+		const managed = await enforceTemporalManagedFile(path, ctx, "write");
+		if (!managed.success) return managed;
+		return { success: true, output: `Updated \`${path}\` with temporal metadata.`, affectedFile: path };
 	},
 };
 
@@ -79,7 +215,9 @@ export const appendToNoteTool: Tool = {
 		const existing = await ctx.vault.cachedRead(file);
 		const separator = existing.endsWith("\n") ? "\n" : "\n\n";
 		await ctx.vault.modify(file, existing + separator + content);
-		return { success: true, output: `Appended to \`${path}\``, affectedFile: path };
+		const managed = await enforceTemporalManagedFile(path, ctx, "append");
+		if (!managed.success) return managed;
+		return { success: true, output: `Appended to \`${path}\` with temporal metadata.`, affectedFile: path };
 	},
 };
 
@@ -96,7 +234,9 @@ export const createNoteTool: Tool = {
 		if (ctx.vault.getAbstractFileByPath(path)) return { success: false, output: `Note already exists: ${path}. Use write_note or append_to_note.` };
 		await ensureFolder(ctx, path);
 		await ctx.vault.create(path, content);
-		return { success: true, output: `Created \`${path}\``, affectedFile: path };
+		const managed = await enforceTemporalManagedFile(path, ctx, "create");
+		if (!managed.success) return managed;
+		return { success: true, output: `Created \`${path}\` with temporal metadata.`, affectedFile: path };
 	},
 };
 
@@ -118,12 +258,16 @@ export const createDailyNoteTool: Tool = {
 			const old = await ctx.vault.cachedRead(existing);
 			const updated = prepend ? content + "\n\n" + old : old + (old.endsWith("\n") ? "\n" : "\n\n") + content;
 			await ctx.vault.modify(existing, updated);
-			return { success: true, output: `Updated daily note \`${path}\``, affectedFile: path };
+			const managed = await enforceTemporalManagedFile(path, ctx, "daily_update");
+			if (!managed.success) return managed;
+			return { success: true, output: `Updated daily note \`${path}\` with temporal metadata.`, affectedFile: path };
 		}
 		await ensureFolder(ctx, path);
 		const header = `# Daily Note — ${dateStr}\n\n`;
 		await ctx.vault.create(path, header + content);
-		return { success: true, output: `Created daily note \`${path}\``, affectedFile: path };
+		const managed = await enforceTemporalManagedFile(path, ctx, "daily_create");
+		if (!managed.success) return managed;
+		return { success: true, output: `Created daily note \`${path}\` with temporal metadata.`, affectedFile: path };
 	},
 };
 
@@ -146,12 +290,16 @@ export const createWeeklyNoteTool: Tool = {
 			const old = await ctx.vault.cachedRead(existing);
 			const updated = prepend ? content + "\n\n" + old : old + (old.endsWith("\n") ? "\n" : "\n\n") + content;
 			await ctx.vault.modify(existing, updated);
-			return { success: true, output: `Updated weekly note \`${path}\``, affectedFile: path };
+			const managed = await enforceTemporalManagedFile(path, ctx, "weekly_update");
+			if (!managed.success) return managed;
+			return { success: true, output: `Updated weekly note \`${path}\` with temporal metadata.`, affectedFile: path };
 		}
 		await ensureFolder(ctx, path);
 		const header = `# Weekly Note — ${year} ${weekStr}\n\n`;
 		await ctx.vault.create(path, header + content);
-		return { success: true, output: `Created weekly note \`${path}\``, affectedFile: path };
+		const managed = await enforceTemporalManagedFile(path, ctx, "weekly_create");
+		if (!managed.success) return managed;
+		return { success: true, output: `Created weekly note \`${path}\` with temporal metadata.`, affectedFile: path };
 	},
 };
 
@@ -284,8 +432,26 @@ export const updateFrontmatterTool: Tool = {
 				fm[k] = v;
 			}
 		});
-		return { success: true, output: `Updated properties for \`${path}\`.`, affectedFile: path };
+		const managed = await enforceTemporalManagedFile(path, ctx, "frontmatter_update");
+		if (!managed.success) return managed;
+		return { success: true, output: `Updated properties for \`${path}\` with temporal metadata.`, affectedFile: path };
 	}
+};
+
+export const migrateTemporalWikiTool: Tool = {
+	name: "migrate_temporal_wiki_notes",
+	description: "One-time migration: normalize markdown notes to strict wiki + temporal format.",
+	parameters: [
+		{ name: "folder", type: "string", description: "Optional folder scope for migration", required: false },
+	],
+	async execute(args, ctx): Promise<ToolResult> {
+		const folderArg = args["folder"] ? String(args["folder"]) : undefined;
+		const report = await migrateManagedMarkdownNotes(ctx, folderArg);
+		return {
+			success: true,
+			output: `Migration complete. scanned=${report.scanned}, migrated=${report.migrated}, skipped=${report.skipped}`,
+		};
+	},
 };
 
 export const getKnowledgeGraphTool: Tool = {
@@ -325,4 +491,5 @@ export function registerAllTools(registry: import("./registry").ToolRegistry): v
 	registry.register(archiveNoteTool);
 	registry.register(updateFrontmatterTool);
 	registry.register(getKnowledgeGraphTool);
+	registry.register(migrateTemporalWikiTool);
 }

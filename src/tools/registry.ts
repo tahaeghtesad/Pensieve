@@ -30,10 +30,25 @@ export class ToolRegistry {
 		if (!tool) {
 			return { success: false, output: `Unknown tool: "${toolName}". Available: ${Array.from(this.tools.keys()).join(", ")}` };
 		}
+		const startedAt = Date.now();
+		const prevToolName = ctx.currentToolName;
+		ctx.currentToolName = toolName;
 		try {
-			return await tool.execute(args, ctx, onTrace);
+			const result = await tool.execute(args, ctx, onTrace);
+			return {
+				...result,
+				executedAt: Date.now(),
+				durationMs: Date.now() - startedAt,
+			};
 		} catch (e) {
-			return { success: false, output: `Tool error: ${e}` };
+			return {
+				success: false,
+				output: `Tool error: ${e}`,
+				executedAt: Date.now(),
+				durationMs: Date.now() - startedAt,
+			};
+		} finally {
+			ctx.currentToolName = prevToolName;
 		}
 	}
 
