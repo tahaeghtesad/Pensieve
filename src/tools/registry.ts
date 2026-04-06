@@ -23,14 +23,15 @@ export class ToolRegistry {
 	async execute(
 		toolName: string,
 		args: Record<string, unknown>,
-		ctx: ToolContext
+		ctx: ToolContext,
+		onTrace?: (step: any) => void
 	): Promise<ToolResult> {
 		const tool = this.tools.get(toolName);
 		if (!tool) {
 			return { success: false, output: `Unknown tool: "${toolName}". Available: ${Array.from(this.tools.keys()).join(", ")}` };
 		}
 		try {
-			return await tool.execute(args, ctx);
+			return await tool.execute(args, ctx, onTrace);
 		} catch (e) {
 			return { success: false, output: `Tool error: ${e}` };
 		}

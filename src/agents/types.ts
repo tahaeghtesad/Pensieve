@@ -15,7 +15,7 @@ export type IntentType =
 	| "archive_task";
 
 export interface TraceStep {
-	type: "thought" | "tool_call" | "observation" | "agent_handoff" | "error";
+	type: "thought" | "tool_call" | "observation" | "agent_handoff" | "error" | "prompt" | "raw_response";
 	content: string;
 	toolName?: string;
 	toolArgs?: Record<string, unknown>;

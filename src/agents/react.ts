@@ -19,6 +19,7 @@ Rules:
 - Use <tool_call> JSON exactly as shown — no extra text outside the tags on the same block
 - Use <final_answer> ONLY when fully done — do not call any more tools after it
 - Never call the same tool with the same arguments twice
+- If a task requires massive context (like reading multiple huge files), use 'delegate_task' immediately.
 `;
 
 export async function runReActLoop(
@@ -39,15 +40,25 @@ export async function runReActLoop(
 		{
 			role: "user",
 			content: ctx.ragContext
-				? `**Vault context:**\n${ctx.ragContext}\n\n---\n**User Directive:**\n${ctx.userQuery}\n\nPlease proceed with the User Directive.`
-				: ctx.userQuery,
+				? `**Vault context:**\n${ctx.ragContext}\n\n---\n**User Directive:**\n${ctx.userQuery}\n\nYou must strictly follow the ReAct formatting rules. Begin your response immediately with <thought>. Do not output conversational text.`
+				: `${ctx.userQuery}\n\nYou must strictly follow the ReAct formatting rules. Begin your response immediately with <thought>. Do not output conversational text.`,
 		},
 	];
+
+	onTrace({
+		type: "prompt",
+		content: JSON.stringify(messages, null, 2)
+	});
 
 	for (let iter = 0; iter < maxIterations; iter++) {
 		let responseText = "";
 		await ollama.chat(settings.chatModel, messages, (token) => {
 			responseText += token;
+		});
+
+		onTrace({
+			type: "raw_response",
+			content: responseText
 		});
 
 		// Emit thought
@@ -81,7 +92,7 @@ export async function runReActLoop(
 		traceSteps.push(callStep);
 		onTrace(callStep);
 
-		const result = await toolRegistry.execute(toolCall.name, toolCall.arguments, toolCtx);
+		const result = await toolRegistry.execute(toolCall.name, toolCall.arguments, toolCtx, onTrace);
 
 		if (result.affectedFile) affectedFiles.add(result.affectedFile);
 

@@ -10,12 +10,17 @@ export interface ToolParam {
 	required: boolean;
 }
 
+export interface SubAgentRunner {
+	runSubAgent(intent: string, query: string, onTrace?: (step: any) => void): Promise<string>;
+}
+
 export interface ToolContext {
 	vault: Vault;
 	app: App;
 	retriever: Retriever;
 	settings: PensieveSettings;
 	ollama: OllamaService;
+	subAgentRunner?: SubAgentRunner;
 }
 
 export interface ToolResult {
@@ -28,5 +33,5 @@ export interface Tool {
 	name: string;
 	description: string;
 	parameters: ToolParam[];
-	execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
+	execute(args: Record<string, unknown>, ctx: ToolContext, onTrace?: (step: any) => void): Promise<ToolResult>;
 }

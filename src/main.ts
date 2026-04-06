@@ -13,8 +13,10 @@ import { ToolRegistry } from "./tools/registry";
 import { registerAllTools } from "./tools/notetools";
 import { registerWebTools } from "./tools/webtools";
 import { registerMemoryTools } from "./tools/memorytools";
+import { registerAgentTools } from "./tools/agent_tools";
 import { Orchestrator } from "./agents/orchestrator";
 import type { ToolContext } from "./tools/types";
+import type { IntentType } from "./agents/types";
 
 interface PensieveData {
 	settings: PensieveSettings;
@@ -52,10 +54,42 @@ export default class PensievePlugin extends Plugin {
 			retriever: this.retriever,
 			settings: this.settings,
 			ollama: this.ollama,
+			subAgentRunner: {
+				runSubAgent: async (intent: string, query: string, onTrace?: (step: any) => void) => {
+					if (!this.orchestrator) throw new Error("Orchestrator not initialized");
+					const subCtx = {
+						userQuery: query,
+						chatHistory: [], // Completely blank history!
+						ragContext: "", // No parent RAG noise
+						toolCtx: this.toolCtx,
+						toolRegistry: this.toolRegistry,
+						ollama: this.ollama,
+						settings: this.settings,
+						onTrace: (step: any) => {
+							if (onTrace) onTrace(step);
+							else {
+								// Prefix and bubble to parent UI dynamically
+								const childStep = { ...step, type: step.type === "thought" ? "thought" : 
+													 step.type === "prompt" ? "prompt" : 
+													 step.type === "raw_response" ? "raw_response" : 
+													 step.type === "tool_call" ? "tool_call" : 
+													 step.type === "observation" ? "observation" : step.type, 
+													 content: `[Sub-Agent] ${step.content}` };
+								// Wait, the parent UI onTrace is bound in ChatView. 
+								// SubAgents don't have access to the parent ChatView's traceList natively unless passed down!
+								// We'll leave it simple for now, the user requested the output rather than trace flooding.
+							}
+						}
+					};
+					const result = await this.orchestrator.runAgent(intent as IntentType, subCtx);
+					return result.answer;
+				}
+			}
 		};
 		registerAllTools(this.toolRegistry);
 		registerWebTools(this.toolRegistry);
 		registerMemoryTools(this.toolRegistry);
+		registerAgentTools(this.toolRegistry);
 
 		// Orchestrator
 		this.orchestrator = new Orchestrator(this.ollama, this.settings);

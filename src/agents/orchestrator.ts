@@ -15,10 +15,10 @@ const CLASSIFY_PROMPT = `You are a task classifier. Classify the user's request 
 Categories:
 - direct_chat: General questions, asking about notes, conversation, no modifications needed
 - write_task: Creating notes, adding content, editing notes, daily/weekly notes, appending
-- plan_task: Complex multi-step planning, organizing goals, structuring projects
+- plan_task: Complex multi-step planning, outlining goals, structuring projects
 - review_task: Reviewing, summarizing, evaluating, or analyzing note content
 - factcheck_task: Verifying facts, checking claims, validating information
-- organize_task: Restructuring the vault, moving files, renaming notes, building folders
+- organize_task: Restructuring the vault, organizing notes, moving files, renaming, building folders
 - synthesize_task: Extracting knowledge graphs, splitting notes into atomic concepts, tagging topics
 - archive_task: Compressing old notes into memory nodes, temporal context extraction, memory decay operations
 

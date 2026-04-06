@@ -241,7 +241,7 @@ export class PensieveChatView extends ItemView {
 	private appendTraceStep(step: TraceStep, list: HTMLElement): void {
 		const row = list.createDiv({ cls: `pensieve-trace-step pensieve-trace-${step.type}` });
 		const icons: Record<string, string> = {
-			thought: "💭", tool_call: "🔧", observation: "👁", agent_handoff: "→", error: "⚠️",
+			thought: "💭", tool_call: "🔧", observation: "👁", agent_handoff: "→", error: "⚠️", prompt: "📥", raw_response: "📤"
 		};
 		row.createSpan({ cls: "pensieve-trace-icon", text: icons[step.type] ?? "•" });
 		const body = row.createDiv({ cls: "pensieve-trace-body" });
@@ -252,11 +252,22 @@ export class PensieveChatView extends ItemView {
 				const args = body.createEl("pre", { cls: "pensieve-trace-args selectable" });
 				args.createEl("code", { text: JSON.stringify(step.toolArgs, null, 2) });
 			}
-		} else if (step.type === "observation") {
+		} else if (step.type === "observation" || step.type === "prompt" || step.type === "raw_response") {
 			const details = body.createEl("details", { cls: "pensieve-trace-details" });
-			details.createEl("summary", { text: "Tool Output" });
+			const titleMap: Record<string, string> = {
+				observation: "Tool Output",
+				prompt: "System & User Prompt",
+				raw_response: "Raw LLM Output"
+			};
+			details.createEl("summary", { text: titleMap[step.type] ?? "Output" });
 			const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
-			MarkdownRenderer.render(this.app, step.content, contentDiv, "", this);
+
+			if (step.type === "prompt" || step.type === "raw_response") {
+				const pre = contentDiv.createEl("pre", { cls: "pensieve-trace-raw" });
+				pre.createEl("code", { text: step.content });
+			} else {
+				MarkdownRenderer.render(this.app, step.content, contentDiv, "", this);
+			}
 		} else {
 			MarkdownRenderer.render(this.app, step.content, body, "", this);
 		}
