@@ -16,6 +16,8 @@ export interface ChatSession {
 	messages: ChatMessage[];
 	createdAt: number;
 	updatedAt: number;
+	summary?: string;
+	summaryIteration?: number;
 }
 
 /** Persistent data shape saved via plugin.saveData(). */
@@ -133,11 +135,26 @@ export class ChatHistoryManager {
 	 */
 	getOllamaHistory(): OllamaMessage[] {
 		const session = this.getActiveSession();
-		return session.messages
+		
+		// If we have a summary, we only keep the last few raw messages to save context limit.
+		// Otherwise we keep all (up to usual chat boundaries which is handled in React)
+		const sliceStartIndex = session.summaryIteration && session.summaryIteration > 5 ? session.summaryIteration - 2 : 0;
+		
+		const rawMessages = session.messages
+			.slice(sliceStartIndex)
 			.filter((m) => m.role !== "system")
 			.map((m) => ({
 				role: m.role,
 				content: m.content,
 			}));
+
+		if (session.summary) {
+			rawMessages.unshift({
+				role: "system",
+				content: `[System Memory Tracker] Here is a rolling summary of the conversation prior to these recent messages:\n\n${session.summary}`
+			});
+		}
+		
+		return rawMessages;
 	}
 }

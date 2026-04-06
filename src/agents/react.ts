@@ -56,11 +56,6 @@ export async function runReActLoop(
 			responseText += token;
 		});
 
-		onTrace({
-			type: "raw_response",
-			content: responseText
-		});
-
 		// Emit thought
 		const thought = toolRegistry.parseThought(responseText);
 		if (thought) {
@@ -85,12 +80,18 @@ export async function runReActLoop(
 
 		const callStep: TraceStep = {
 			type: "tool_call",
-			content: `Calling **${toolCall.name}**`,
+			content: `Calling **${toolCall.name}** with arguments: \n\`\`\`json\n${JSON.stringify(toolCall.arguments, null, 2)}\n\`\`\``,
 			toolName: toolCall.name,
 			toolArgs: toolCall.arguments,
 		};
 		traceSteps.push(callStep);
 		onTrace(callStep);
+
+		const execStep: TraceStep = {
+			type: "observation",
+			content: "⏳ Executing tool (waiting for background response)..."
+		};
+		onTrace(execStep);
 
 		const result = await toolRegistry.execute(toolCall.name, toolCall.arguments, toolCtx, onTrace);
 
@@ -110,6 +111,27 @@ export async function runReActLoop(
 			role: "user",
 			content: `<observation>${result.success ? result.output : "Error: " + result.output}</observation>\n\nContinue.`,
 		});
+
+		// ── Iteration State Compactor ──────────────────────────────────────────
+		// Retain the very first init messages, and the newest raw iteration. 
+		// Compress the iteration that just aged out to prevent context destruction.
+		const baseMsgCount = 2 + ctx.chatHistory.length;
+		if (messages.length > baseMsgCount + 2) {
+			const targetAstIdx = messages.length - 4; // The old assistant message
+			const targetObsIdx = messages.length - 3; // The old user observation message
+
+			if (messages[targetAstIdx] && messages[targetObsIdx]) {
+				const oldAstText = messages[targetAstIdx].content;
+				const oldThought = toolRegistry.parseThought(oldAstText) || "Continued reasoning.";
+				const oldTool = toolRegistry.parseToolCall(oldAstText);
+				messages[targetAstIdx].content = `[Past Iteration] Thought: ${oldThought}. Action: ${oldTool ? oldTool.name : "None"}.`;
+
+				const oldObsText = messages[targetObsIdx].content;
+				messages[targetObsIdx].content = oldObsText.length > 500 
+					? oldObsText.substring(0, 500) + "\n... [Observation mathematically truncated to protect context window limit]"
+					: oldObsText;
+			}
+		}
 	}
 
 	// Force final answer after max iterations

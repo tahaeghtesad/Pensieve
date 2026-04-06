@@ -15,6 +15,7 @@ import { registerWebTools } from "./tools/webtools";
 import { registerMemoryTools } from "./tools/memorytools";
 import { registerAgentTools } from "./tools/agent_tools";
 import { Orchestrator } from "./agents/orchestrator";
+import { MemoryCompactor } from "./compactor";
 import type { ToolContext } from "./tools/types";
 import type { IntentType } from "./agents/types";
 
@@ -32,6 +33,8 @@ export default class PensievePlugin extends Plugin {
 	toolRegistry!: ToolRegistry;
 	toolCtx!: ToolContext;
 	orchestrator!: Orchestrator;
+	compactor!: MemoryCompactor;
+	private view: PensieveChatView | null = null;
 
 	async onload(): Promise<void> {
 		console.log("[Pensieve] Loading plugin...");
@@ -91,8 +94,9 @@ export default class PensievePlugin extends Plugin {
 		registerMemoryTools(this.toolRegistry);
 		registerAgentTools(this.toolRegistry);
 
-		// Orchestrator
+		// Orchestrator & Compactor
 		this.orchestrator = new Orchestrator(this.ollama, this.settings);
+		this.compactor = new MemoryCompactor(this.app.vault, this.ollama, this.settings, this.chatHistory);
 
 		// UI
 		this.registerView(VIEW_TYPE_PENSIEVE_CHAT, (leaf) => new PensieveChatView(leaf, this));

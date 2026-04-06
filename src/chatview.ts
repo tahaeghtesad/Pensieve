@@ -125,32 +125,51 @@ export class PensieveChatView extends ItemView {
 	private renderSessionList(): void {
 		this.sessionListEl.empty();
 		const sessions = this.plugin.chatHistory.getSessions();
-		if (sessions.length === 0) {
-			this.sessionListEl.createDiv({ cls: "pensieve-empty-sessions", text: "No chat history yet." });
-			return;
-		}
-		const back = this.sessionListEl.createEl("button", { cls: "pensieve-action-btn pensieve-back-btn", text: "← Back to chat" });
+		
+		const headerWrap = this.sessionListEl.createDiv({ cls: "pensieve-session-list-header" });
+		const back = headerWrap.createEl("button", { cls: "pensieve-action-btn pensieve-back-btn", text: "← Back to chat" });
 		back.addEventListener("click", () => this.hideSessionList());
 
-		for (const s of sessions) {
-			const item = this.sessionListEl.createDiv({ cls: "pensieve-session-item" });
-			const info = item.createDiv({ cls: "pensieve-session-info" });
-			info.createDiv({ cls: "pensieve-session-title", text: s.title });
-			info.createDiv({ cls: "pensieve-session-date", text: new Date(s.updatedAt).toLocaleString() });
-			info.addEventListener("click", () => {
-				this.plugin.chatHistory.setActiveSession(s.id);
-				this.renderAllMessages();
-				this.hideSessionList();
-			});
-			const del = item.createEl("button", { cls: "pensieve-session-delete", attr: { "aria-label": "Delete" } });
-			setIcon(del, "trash-2");
-			del.addEventListener("click", (e) => {
-				e.stopPropagation();
-				this.plugin.chatHistory.deleteSession(s.id);
-				this.plugin.saveChatHistory();
-				this.renderSessionList();
-			});
-		}
+		const searchInput = headerWrap.createEl("input", { 
+			type: "text", 
+			cls: "pensieve-session-search", 
+			placeholder: "Search past chats..." 
+		});
+
+		const listWrap = this.sessionListEl.createDiv({ cls: "pensieve-sessions-container" });
+
+		const renderItems = (query: string) => {
+			listWrap.empty();
+			const filtered = sessions.filter((s: import("./chathistory").ChatSession) => s.title.toLowerCase().includes(query.toLowerCase()) || (s.summary && s.summary.toLowerCase().includes(query.toLowerCase())));
+			
+			if (filtered.length === 0) {
+				listWrap.createDiv({ cls: "pensieve-empty-sessions", text: sessions.length === 0 ? "No chat history yet." : "No matching sessions." });
+				return;
+			}
+			
+			for (const s of filtered) {
+				const item = listWrap.createDiv({ cls: "pensieve-session-item" });
+				const info = item.createDiv({ cls: "pensieve-session-info" });
+				info.createDiv({ cls: "pensieve-session-title", text: s.title });
+				info.createDiv({ cls: "pensieve-session-date", text: new Date(s.updatedAt).toLocaleString() });
+				info.addEventListener("click", () => {
+					this.plugin.chatHistory.setActiveSession(s.id);
+					this.renderAllMessages();
+					this.hideSessionList();
+				});
+				const del = item.createEl("button", { cls: "pensieve-session-delete", attr: { "aria-label": "Delete" } });
+				setIcon(del, "trash-2");
+				del.addEventListener("click", (e) => {
+					e.stopPropagation();
+					this.plugin.chatHistory.deleteSession(s.id);
+					this.plugin.saveChatHistory();
+					renderItems(searchInput.value);
+				});
+			}
+		};
+
+		searchInput.addEventListener("input", () => renderItems(searchInput.value));
+		renderItems("");
 	}
 
 	// ── Message rendering ────────────────────────────────────
@@ -241,7 +260,7 @@ export class PensieveChatView extends ItemView {
 	private appendTraceStep(step: TraceStep, list: HTMLElement): void {
 		const row = list.createDiv({ cls: `pensieve-trace-step pensieve-trace-${step.type}` });
 		const icons: Record<string, string> = {
-			thought: "💭", tool_call: "🔧", observation: "👁", agent_handoff: "→", error: "⚠️", prompt: "📥", raw_response: "📤"
+			thought: "💭", tool_call: "🔧", observation: "👁", agent_handoff: "→", error: "⚠️", prompt: "📥"
 		};
 		row.createSpan({ cls: "pensieve-trace-icon", text: icons[step.type] ?? "•" });
 		const body = row.createDiv({ cls: "pensieve-trace-body" });
@@ -252,17 +271,16 @@ export class PensieveChatView extends ItemView {
 				const args = body.createEl("pre", { cls: "pensieve-trace-args selectable" });
 				args.createEl("code", { text: JSON.stringify(step.toolArgs, null, 2) });
 			}
-		} else if (step.type === "observation" || step.type === "prompt" || step.type === "raw_response") {
+		} else if (step.type === "observation" || step.type === "prompt") {
 			const details = body.createEl("details", { cls: "pensieve-trace-details" });
 			const titleMap: Record<string, string> = {
 				observation: "Tool Output",
-				prompt: "System & User Prompt",
-				raw_response: "Raw LLM Output"
+				prompt: "System & User Prompt"
 			};
 			details.createEl("summary", { text: titleMap[step.type] ?? "Output" });
 			const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
 
-			if (step.type === "prompt" || step.type === "raw_response") {
+			if (step.type === "prompt") {
 				const pre = contentDiv.createEl("pre", { cls: "pensieve-trace-raw" });
 				pre.createEl("code", { text: step.content });
 			} else {
@@ -303,19 +321,40 @@ export class PensieveChatView extends ItemView {
 		this.appendMessageBubble(userMsg);
 
 		const typing = this.showTyping();
+		
+		// Immediately open the reasoning drawer to stream what happened behind the scenes
+		const { wrap: traceWrap, list: traceList, toggle: traceToggle } = this.createTraceContainer();
+		traceWrap.open = true;
+		this.scrollToBottom();
 
 		try {
 			// RAG context (used by both paths)
+			this.appendTraceStep({ type: "observation", content: "Retrieving relevant context from vault..." }, traceList);
+			this.scrollToBottom();
+			
 			const chunks = await this.plugin.retriever.retrieve(text);
 			const context = this.plugin.retriever.buildContext(chunks);
 			const sources: string[] = Array.from(new Set(chunks.map((c: { filePath: string }) => c.filePath)));
+			
+			if (chunks.length > 0) {
+				this.appendTraceStep({ type: "observation", content: `Retrieved ${chunks.length} notes as context.` }, traceList);
+			}
+
 			const history = this.plugin.chatHistory.getOllamaHistory();
 			history.pop(); // will be added by buildMessages / agent
 
 			// Classify intent
+			this.appendTraceStep({ type: "observation", content: "Analyzing task intent & routing..." }, traceList);
+			this.scrollToBottom();
 			const intent = await this.plugin.orchestrator.classify(text);
+			
+			this.appendTraceStep({ type: "agent_handoff", content: `Routed to **${intent}**` }, traceList);
+			this.scrollToBottom();
 
 			if (intent === "direct_chat") {
+				traceWrap.open = false; // Hide trace container for simple chat
+				traceToggle.setText(`⚙ System Trace (${traceList.children.length} steps) — click to expand`);
+				
 				// ── Streaming Q&A (unchanged) ────────────────────
 				const messages = this.plugin.retriever.buildMessages(
 					this.plugin.settings.systemPrompt, context, history, text
@@ -340,11 +379,13 @@ export class PensieveChatView extends ItemView {
 
 				this.plugin.chatHistory.updateLastAssistantMessage(fullContent, sources.length > 0 ? sources : undefined);
 
+				// Fire trailing memory integration empty
+				this.plugin.compactor.checkAndCompact();
+
 			} else {
 				// ── Agentic path ─────────────────────────────────
 				typing.remove();
-				const { wrap: traceWrap, list: traceList, toggle: traceToggle } = this.createTraceContainer();
-				this.scrollToBottom();
+				// Trace container already created and open; we just keep appending to it!
 
 				const agentCtx: AgentContext = {
 					userQuery: text,
@@ -387,6 +428,9 @@ export class PensieveChatView extends ItemView {
 				if (result.affectedFiles.length > 0) {
 					this.plugin.retriever.setVectorStore(this.plugin.indexer.vectorStore);
 				}
+
+				// Fire trailing memory integration asynchronous loop
+				this.plugin.compactor.checkAndCompact();
 			}
 		} catch (e) {
 			typing.remove();
