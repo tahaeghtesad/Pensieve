@@ -12,6 +12,7 @@ import { PensieveChatView, VIEW_TYPE_PENSIEVE_CHAT } from "./chatview";
 import { ToolRegistry } from "./tools/registry";
 import { registerAllTools } from "./tools/notetools";
 import { registerWebTools } from "./tools/webtools";
+import { registerMemoryTools } from "./tools/memorytools";
 import { Orchestrator } from "./agents/orchestrator";
 import type { ToolContext } from "./tools/types";
 
@@ -50,9 +51,11 @@ export default class PensievePlugin extends Plugin {
 			app: this.app,
 			retriever: this.retriever,
 			settings: this.settings,
+			ollama: this.ollama,
 		};
 		registerAllTools(this.toolRegistry);
 		registerWebTools(this.toolRegistry);
+		registerMemoryTools(this.toolRegistry);
 
 		// Orchestrator
 		this.orchestrator = new Orchestrator(this.ollama, this.settings);

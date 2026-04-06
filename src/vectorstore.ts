@@ -6,6 +6,7 @@ export interface VectorEntry {
 	text: string;
 	embedding: number[];
 	lastModified: number;
+	ctime?: number; // Optional for backward compatibility with existing vector index
 }
 
 /** A scored search result. */
@@ -59,6 +60,11 @@ export class VectorStore {
 	/** Add one or more entries. */
 	addEntries(entries: VectorEntry[]): void {
 		this.entries.push(...entries);
+	}
+
+	/** Return all entries currently stored for global clustering or analysis. */
+	getAllEntries(): VectorEntry[] {
+		return Array.from(this.entries);
 	}
 
 	/** Remove all entries referencing a given file path. */

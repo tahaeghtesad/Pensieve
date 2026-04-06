@@ -29,6 +29,10 @@ export class Retriever {
 		this.vectorStore = store;
 	}
 
+	getStore(): VectorStore {
+		return this.vectorStore;
+	}
+
 	/**
 	 * Retrieve the top-K most relevant chunks for a given query.
 	 */
@@ -87,15 +91,8 @@ export class Retriever {
 		userQuery: string
 	): OllamaMessage[] {
 		const messages: OllamaMessage[] = [];
+		messages.push({ role: "system", content: systemPrompt });
 
-		// System message with context
-		const fullSystemPrompt = context
-			? systemPrompt + context
-			: systemPrompt;
-
-		messages.push({ role: "system", content: fullSystemPrompt });
-
-		// Past conversation (trimmed to maxChatHistory)
 		const maxHist = this.settings.maxChatHistory;
 		const historySlice =
 			chatHistory.length > maxHist
@@ -104,8 +101,11 @@ export class Retriever {
 
 		messages.push(...historySlice);
 
-		// Current user query
-		messages.push({ role: "user", content: userQuery });
+		const finalContent = context
+			? `${context}\n\n**User Question:**\n${userQuery}`
+			: userQuery;
+
+		messages.push({ role: "user", content: finalContent });
 
 		return messages;
 	}

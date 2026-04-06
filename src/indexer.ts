@@ -109,6 +109,7 @@ export class VaultIndexer {
 				chunkIndex: number;
 				text: string;
 				lastModified: number;
+				ctime: number;
 			}[] = [];
 
 			const flushPending = async () => {
@@ -130,6 +131,7 @@ export class VaultIndexer {
 					text: c.text,
 					embedding: embeddings[i] ?? [],
 					lastModified: c.lastModified,
+					ctime: c.ctime,
 				}));
 
 				this.vectorStore.addEntries(entries);
@@ -169,6 +171,7 @@ export class VaultIndexer {
 						chunkIndex: ci,
 						text: chunk.text,
 						lastModified: file.stat.mtime,
+						ctime: file.stat.ctime,
 					});
 
 					if (pendingChunks.length >= EMBED_BATCH_SIZE) {
@@ -223,6 +226,7 @@ export class VaultIndexer {
 				text: c.text,
 				embedding: embeddings[i] ?? [],
 				lastModified: file.stat.mtime,
+				ctime: file.stat.ctime,
 			}));
 
 			this.vectorStore.addEntries(entries);

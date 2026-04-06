@@ -39,7 +39,7 @@ export async function runReActLoop(
 		{
 			role: "user",
 			content: ctx.ragContext
-				? `${ctx.userQuery}\n\n---\n**Vault context:**\n${ctx.ragContext}`
+				? `**Vault context:**\n${ctx.ragContext}\n\n---\n**User Directive:**\n${ctx.userQuery}\n\nPlease proceed with the User Directive.`
 				: ctx.userQuery,
 		},
 	];

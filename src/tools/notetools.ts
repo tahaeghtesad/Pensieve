@@ -13,7 +13,7 @@ function joinPath(folder: string, file: string): string {
 	return cleanFolder ? `${cleanFolder}/${file}` : file;
 }
 
-async function ensureFolder(ctx: ToolContext, filePath: string): Promise<void> {
+export async function ensureFolder(ctx: ToolContext, filePath: string): Promise<void> {
 	const parts = filePath.split("/").slice(0, -1);
 	if (parts.length === 0) return;
 	let cur = "";
