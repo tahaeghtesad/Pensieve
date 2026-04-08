@@ -1,4 +1,4 @@
-import { requestUrl } from "obsidian";
+import { requestUrl, Notice } from "obsidian";
 
 /** A single message in the Ollama chat format. */
 export interface OllamaMessage {
@@ -113,8 +113,9 @@ export class OllamaService {
 						fullContent += token;
 						onToken(token);
 					}
-				} catch {
-					// skip malformed JSON lines
+				} catch (e) {
+					console.error("[Pensieve] Malformed JSON in Ollama stream:", e);
+					new Notice("Pensieve Error: Malformed JSON in Ollama stream — " + (e instanceof Error ? e.message : String(e)), 5000);
 				}
 			}
 		}

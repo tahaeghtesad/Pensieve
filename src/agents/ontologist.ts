@@ -16,12 +16,20 @@ Use the 'extract_knowledge_triplets' tool. You must format your parameter 'tripl
   {"subject": "EntityA", "predicate": "verb-phrase", "object": "EntityB"}
 ]
 
+## 1-SHOT EXAMPLE
+
+Given a chunk of text about neural networks, you would respond EXACTLY like this:
+
+<thought>I need to extract knowledge triplets from this text about neural networks and backpropagation.</thought>
+<tool_call>{"name": "extract_knowledge_triplets", "arguments": {"triplets": "[{\\"subject\\": \\"Neural Network\\", \\"predicate\\": \\"uses\\", \\"object\\": \\"Backpropagation\\"}, {\\"subject\\": \\"Backpropagation\\", \\"predicate\\": \\"computes\\", \\"object\\": \\"Gradient\\"}, {\\"subject\\": \\"Gradient\\", \\"predicate\\": \\"updates\\", \\"object\\": \\"Weights\\"}]"}}</tool_call>
+
 RULES:
 1. Ensure relationships are directional and contextually grounded.
 2. Resolve pronouns to their explicit entity names.
 3. Do not output markdown formatting outside the JSON array parameter when using the tool.
 4. Do not include conversational filler like "Here are the triplets."
 5. If the user asks a complex multi-hop question (e.g. 'How does X affect Y?'), actively use the 'graph_traversal_search' tool to pull absolute entity logic instead of standard 'search_vault' guessing string matches.
+6. The "triplets" argument must be a raw JSON string, NOT wrapped in markdown code blocks.
 `;
 	}
 }

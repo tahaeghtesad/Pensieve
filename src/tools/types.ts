@@ -11,8 +11,13 @@ export interface ToolParam {
 	required: boolean;
 }
 
+export interface SubAgentRunResult {
+	answer: string;
+	affectedFiles: string[];
+}
+
 export interface SubAgentRunner {
-	runSubAgent(intent: string, query: string, onTrace?: (step: any) => void): Promise<string>;
+	runSubAgent(intent: string, query: string, onTrace?: (step: any) => void): Promise<SubAgentRunResult>;
 }
 
 export interface TemporalContext {
@@ -39,6 +44,7 @@ export interface ToolResult {
 	success: boolean;
 	output: string;
 	affectedFile?: string;
+	affectedFiles?: string[];
 	executedAt?: number;
 	durationMs?: number;
 }

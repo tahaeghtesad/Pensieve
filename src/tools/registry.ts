@@ -5,6 +5,14 @@ export interface ParsedToolCall {
 	arguments: Record<string, unknown>;
 }
 
+/** Thrown when <tool_call> tags are present but contain invalid JSON. */
+export class MalformedToolCallError extends Error {
+	constructor(rawContent: string) {
+		super("Malformed JSON in tool call: " + rawContent.slice(0, 200));
+		this.name = "MalformedToolCallError";
+	}
+}
+
 export class ToolRegistry {
 	private tools: Map<string, Tool> = new Map();
 
@@ -75,7 +83,7 @@ export class ToolRegistry {
 				arguments: (parsed["arguments"] ?? parsed["args"] ?? {}) as Record<string, unknown>,
 			};
 		} catch {
-			return null;
+			throw new MalformedToolCallError(match[1].trim());
 		}
 	}
 

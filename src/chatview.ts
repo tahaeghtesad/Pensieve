@@ -231,6 +231,8 @@ export class PensieveChatView extends ItemView {
 
 		if (msg.role === "assistant") {
 			MarkdownRenderer.render(this.app, msg.content || "...", contentEl, "", this);
+			// Post-process: find file paths (e.g., "Research/Note.md" or "Folder/Note") and make them clickable
+			this.linkifyVaultPaths(contentEl);
 		} else {
 			contentEl.createDiv({ cls: "pensieve-bubble-text", text: msg.content });
 		}
@@ -241,19 +243,76 @@ export class PensieveChatView extends ItemView {
 			this.renderFileList(meta, msg.sources, "📎", "sources");
 		}
 		if (msg.affectedFiles && msg.affectedFiles.length > 0) {
-			this.renderFileList(meta, msg.affectedFiles, "✏️", "affected");
+			this.renderFileList(meta, msg.affectedFiles, "✏️", "affected", true);
 		}
 
 		return bubble;
 	}
 
-	private renderFileList(parent: HTMLElement, files: string[], icon: string, cls: string): void {
+	/**
+	 * Post-process a rendered content element to find vault file paths and make them clickable.
+	 * Detects patterns like `path/to/file.md` or backtick-wrapped paths.
+	 */
+	private linkifyVaultPaths(el: HTMLElement): void {
+		const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+		const textNodes: Text[] = [];
+		let node: Text | null;
+		while ((node = walker.nextNode() as Text | null)) {
+			textNodes.push(node);
+		}
+
+		// Match file paths: word chars, slashes, spaces, hyphens ending in .md
+		const pathRegex = /(?:^|[\s`"'(])(([\w\s\-./]+\.md))/g;
+
+		for (const textNode of textNodes) {
+			const text = textNode.textContent ?? "";
+			if (!pathRegex.test(text)) continue;
+			pathRegex.lastIndex = 0;
+
+			const frag = document.createDocumentFragment();
+			let lastIndex = 0;
+			let match: RegExpExecArray | null;
+
+			while ((match = pathRegex.exec(text)) !== null) {
+				const fullMatch = match[1]!;
+				const filePath = fullMatch.trim();
+				const matchStart = match.index + (match[0].length - match[1]!.length);
+
+				// Add text before the match
+				if (matchStart > lastIndex) {
+					frag.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
+				}
+
+				// Create clickable link
+				const link = document.createElement("a");
+				link.className = "pensieve-inline-file-link";
+				link.textContent = filePath;
+				link.href = filePath;
+				link.addEventListener("click", (e) => {
+					e.preventDefault();
+					this.app.workspace.openLinkText(filePath, "", false);
+				});
+				frag.appendChild(link);
+
+				lastIndex = matchStart + fullMatch.length;
+			}
+
+			if (lastIndex > 0) {
+				if (lastIndex < text.length) {
+					frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+				}
+				textNode.parentNode?.replaceChild(frag, textNode);
+			}
+		}
+	}
+
+	private renderFileList(parent: HTMLElement, files: string[], icon: string, cls: string, expandedByDefault = false): void {
 		const el = parent.createDiv({ cls: `pensieve-sources pensieve-${cls}` });
 		const toggle = el.createEl("button", {
 			cls: "pensieve-sources-toggle",
 			text: `${icon} ${files.length} ${cls === "affected" ? "modified" : `source${files.length > 1 ? "s" : ""}`}`,
 		});
-		const list = el.createDiv({ cls: "pensieve-sources-list hidden" });
+		const list = el.createDiv({ cls: expandedByDefault ? "pensieve-sources-list" : "pensieve-sources-list hidden" });
 		for (const f of files) {
 			const item = list.createDiv({ cls: "pensieve-source-item" });
 			const a = item.createEl("a", { cls: "pensieve-source-link", text: f, href: f });
@@ -265,15 +324,26 @@ export class PensieveChatView extends ItemView {
 		toggle.addEventListener("click", () => list.classList.toggle("hidden"));
 	}
 
+	private traceStepCounter = 0;
+
 	private createTraceContainer(): { wrap: HTMLDetailsElement; list: HTMLElement; toggle: HTMLElement } {
 		const wrap = this.chatContainer.createEl("details", { cls: "pensieve-trace-details pensieve-trace" }) as HTMLDetailsElement;
-		wrap.open = true; // Show reasoning automatically
-		const toggle = wrap.createEl("summary", { cls: "pensieve-trace-summary", text: "⚙ Pensieve's thought process..." });
+		wrap.open = false; // Default to closed
+		this.traceStepCounter = 0;
+		const toggle = wrap.createEl("summary", { cls: "pensieve-trace-summary" });
+		toggle.createSpan({ text: "⚙ Agent reasoning" });
+		toggle.createSpan({ cls: "pensieve-trace-step-indicator", text: " (Step 0)..." });
 		const list = wrap.createDiv({ cls: "pensieve-trace-list" });
 		return { wrap, list, toggle };
 	}
 
 	private appendTraceStep(step: TraceStep, list: HTMLElement): void {
+		this.traceStepCounter++;
+		// Update the dynamic step indicator in the summary
+		const indicator = list.parentElement?.querySelector(".pensieve-trace-step-indicator");
+		if (indicator) {
+			indicator.textContent = ` (Step ${this.traceStepCounter})...`;
+		}
 		const row = list.createDiv({ cls: `pensieve-trace-step pensieve-trace-${step.type}` });
 		const icons: Record<string, string> = {
 			thought: "💭", tool_call: "🔧", observation: "👁", agent_handoff: "→", error: "⚠️", prompt: "📥"
@@ -288,18 +358,38 @@ export class PensieveChatView extends ItemView {
 				args.createEl("code", { text: JSON.stringify(step.toolArgs, null, 2) });
 			}
 		} else if (step.type === "observation" || step.type === "prompt") {
-			const details = body.createEl("details", { cls: "pensieve-trace-details" });
-			const titleMap: Record<string, string> = {
-				observation: "Tool Output",
-				prompt: "System & User Prompt"
-			};
-			details.createEl("summary", { text: titleMap[step.type] ?? "Output" });
-			const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
-
 			if (step.type === "prompt") {
-				const pre = contentDiv.createEl("pre", { cls: "pensieve-trace-raw" });
-				pre.createEl("code", { text: step.content });
+				// Parse the JSON messages and render as two readable boxes
+				try {
+					const messages = JSON.parse(step.content) as { role: string; content: string }[];
+					const systemMsg = messages.find(m => m.role === "system");
+					const userMsg = messages.find(m => m.role === "user");
+
+					if (systemMsg) {
+						const sysDetails = body.createEl("details", { cls: "pensieve-trace-details" });
+						sysDetails.createEl("summary", { text: "System Prompt" });
+						const sysContent = sysDetails.createDiv({ cls: "pensieve-trace-details-content pensieve-trace-prompt-box selectable" });
+						MarkdownRenderer.render(this.app, systemMsg.content, sysContent, "", this);
+					}
+
+					if (userMsg) {
+						const usrDetails = body.createEl("details", { cls: "pensieve-trace-details" });
+						usrDetails.createEl("summary", { text: "User Input" });
+						const usrContent = usrDetails.createDiv({ cls: "pensieve-trace-details-content pensieve-trace-prompt-box selectable" });
+						MarkdownRenderer.render(this.app, userMsg.content, usrContent, "", this);
+					}
+				} catch {
+					// Fallback: render as raw text if JSON parsing fails
+					const details = body.createEl("details", { cls: "pensieve-trace-details" });
+					details.createEl("summary", { text: "System & User Prompt" });
+					const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
+					const pre = contentDiv.createEl("pre", { cls: "pensieve-trace-raw" });
+					pre.createEl("code", { text: step.content });
+				}
 			} else {
+				const details = body.createEl("details", { cls: "pensieve-trace-details" });
+				details.createEl("summary", { text: "Tool Output" });
+				const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
 				MarkdownRenderer.render(this.app, step.content, contentDiv, "", this);
 			}
 		} else {
@@ -347,9 +437,8 @@ export class PensieveChatView extends ItemView {
 
 		const typing = this.showTyping();
 		
-		// Immediately open the reasoning drawer to stream what happened behind the scenes
+		// Create reasoning drawer (defaults to closed, with dynamic step counter)
 		const { wrap: traceWrap, list: traceList, toggle: traceToggle } = this.createTraceContainer();
-		traceWrap.open = true;
 		this.scrollToBottom();
 
 		try {
@@ -400,13 +489,29 @@ export class PensieveChatView extends ItemView {
 				const bubble = this.appendMessageBubble(assistantMsg);
 				const contentEl = bubble.querySelector(".pensieve-bubble-content") as HTMLElement;
 				let fullContent = "";
+				let renderPending = false;
+				let renderTimer: ReturnType<typeof setTimeout> | null = null;
+
+				const flushRender = () => {
+					renderPending = false;
+					contentEl.empty();
+					contentEl.textContent = fullContent;
+					this.scrollToBottom();
+				};
 
 				await this.plugin.ollama.chat(this.plugin.settings.chatModel, messages, (token: string) => {
 					fullContent += token;
-					contentEl.empty();
-					MarkdownRenderer.render(this.app, fullContent, contentEl, "", this);
-					this.scrollToBottom();
+					if (!renderPending) {
+						renderPending = true;
+						if (renderTimer) clearTimeout(renderTimer);
+						renderTimer = setTimeout(flushRender, 100);
+					}
 				}, this.abortSignal);
+
+				// Final full markdown render after stream completes
+				if (renderTimer) clearTimeout(renderTimer);
+				contentEl.empty();
+				MarkdownRenderer.render(this.app, fullContent, contentEl, "", this);
 
 				this.plugin.chatHistory.updateLastAssistantMessage(fullContent, sources.length > 0 ? sources : undefined);
 
@@ -478,7 +583,8 @@ export class PensieveChatView extends ItemView {
 				timestamp: Date.now(),
 			};
 			this.plugin.chatHistory.addMessage(errMsg);
-			this.appendMessageBubble(errMsg);
+			const errorBubble = this.appendMessageBubble(errMsg);
+			errorBubble.addClass("pensieve-bubble-error");
 		} finally {
 			this.isGenerating = false;
 			setIcon(this.sendBtn, "send");

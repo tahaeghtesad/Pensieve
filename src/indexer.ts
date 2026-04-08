@@ -56,6 +56,7 @@ export class VaultIndexer {
 			}
 		} catch (e) {
 			console.error("[Pensieve] Failed to load index:", e);
+			new Notice("Pensieve Error: Failed to load index — " + (e instanceof Error ? e.message : String(e)), 5000);
 		}
 	}
 
@@ -76,6 +77,7 @@ export class VaultIndexer {
 			);
 		} catch (e) {
 			console.error("[Pensieve] Failed to save index:", e);
+			new Notice("Pensieve Error: Failed to save index — " + (e instanceof Error ? e.message : String(e)), 5000);
 		}
 	}
 
@@ -233,6 +235,7 @@ export class VaultIndexer {
 			await this.saveIndex();
 		} catch (e) {
 			console.error(`[Pensieve] Failed to index ${file.path}:`, e);
+			new Notice("Pensieve Error: Failed to index " + file.path + " — " + (e instanceof Error ? e.message : String(e)), 5000);
 		}
 	}
 

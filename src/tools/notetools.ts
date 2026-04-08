@@ -56,6 +56,17 @@ function normalizeTags(value: unknown): string[] {
 	return Array.from(new Set(normalized));
 }
 
+/**
+ * Strips markdown codeblock wrappers (```json ... ```) that LLMs often wrap
+ * around JSON arguments before calling JSON.parse().
+ */
+export function cleanJsonString(str: string): string {
+	let cleaned = str.trim();
+	// Strip ```json ... ``` or ``` ... ``` wrappers
+	cleaned = cleaned.replace(/^```(?:json|JSON)?\s*\n?([\s\S]*?)\n?\s*```$/m, "$1");
+	return cleaned.trim();
+}
+
 function hasSection(body: string, title: string): boolean {
 	const sectionRe = new RegExp(`^##\\s+${title}\\s*$`, "m");
 	return sectionRe.test(body);
@@ -422,7 +433,7 @@ export const updateFrontmatterTool: Tool = {
 		
 		let props: Record<string, unknown>;
 		try {
-			props = JSON.parse(String(args["properties"] ?? "{}"));
+			props = JSON.parse(cleanJsonString(String(args["properties"] ?? "{}")));
 		} catch {
 			return { success: false, output: "Properties must be a valid JSON string." };
 		}

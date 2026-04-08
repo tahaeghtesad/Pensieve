@@ -1,5 +1,6 @@
 import { TFile } from "obsidian";
 import type { Tool, ToolContext, ToolResult } from "./types";
+import { cleanJsonString } from "./notetools";
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ export const lintYamlFrontmatterTool: Tool = {
 		// Parse the inferred tags
 		let newTags: string[];
 		try {
-			const parsed = JSON.parse(String(args["inferred_tags"] ?? "[]"));
+			const parsed = JSON.parse(cleanJsonString(String(args["inferred_tags"] ?? "[]")));
 			if (!Array.isArray(parsed)) return { success: false, output: "inferred_tags must be a JSON array of strings." };
 			newTags = parsed.map((t: unknown) => String(t).trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()).filter((t: string) => t.length > 0);
 		} catch {
@@ -107,7 +108,7 @@ export const reparentOrphanNodesTool: Tool = {
 		// Parse proposed links
 		let links: string[];
 		try {
-			const parsed = JSON.parse(String(args["proposed_links"] ?? "[]"));
+			const parsed = JSON.parse(cleanJsonString(String(args["proposed_links"] ?? "[]")));
 			if (!Array.isArray(parsed)) return { success: false, output: "proposed_links must be a JSON array of strings." };
 			links = parsed.map((l: unknown) => {
 				let s = String(l).trim();

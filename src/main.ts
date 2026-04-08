@@ -102,7 +102,7 @@ export default class PensievePlugin extends Plugin {
 						}
 					};
 					const result = await this.orchestrator.runAgent(intent as IntentType, subCtx);
-					return result.answer;
+					return { answer: result.answer, affectedFiles: result.affectedFiles };
 				}
 			}
 		};

@@ -1,3 +1,5 @@
+import { Notice } from "obsidian";
+
 /** A single stored vector entry. */
 export interface VectorEntry {
 	id: string;
@@ -114,8 +116,9 @@ export class VectorStore {
 			if (data.version === 1 && Array.isArray(data.entries)) {
 				store.entries = data.entries;
 			}
-		} catch {
-			// corrupt data — return empty store
+		} catch (e) {
+			console.error("[Pensieve] Corrupt vector index:", e);
+			new Notice("Pensieve Error: Corrupt vector index — starting with empty store. " + (e instanceof Error ? e.message : String(e)), 5000);
 		}
 		return store;
 	}

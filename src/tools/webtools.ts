@@ -15,6 +15,15 @@ export const searchWebTool: Tool = {
 				}
 			});
 			
+			// Check for DuckDuckGo rate-limiting or captcha
+			const responseText = res.text.toLowerCase();
+			if (responseText.includes("captcha") || responseText.includes("rate limit") || responseText.includes("rate-limit")) {
+				return {
+					success: false,
+					output: "DuckDuckGo has blocked this request (captcha/rate-limit detected). Try an alternative approach: use 'query_wikipedia' for factual lookups, or 'read_webpage' with a direct URL instead."
+				};
+			}
+			
 			const parser = new DOMParser();
 			const doc = parser.parseFromString(res.text, "text/html");
 			const results = Array.from(doc.querySelectorAll(".result__body")).slice(0, 5);

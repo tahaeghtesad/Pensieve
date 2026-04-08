@@ -1,4 +1,5 @@
 import type { Tool, ToolResult } from "./types";
+import { cleanJsonString } from "./notetools";
 
 export const extractKnowledgeTripletsTool: Tool = {
 	name: "extract_knowledge_triplets",
@@ -12,7 +13,7 @@ export const extractKnowledgeTripletsTool: Tool = {
 		}
 		
 		try {
-			const jsonStr = String(args["triplets"]);
+			const jsonStr = cleanJsonString(String(args["triplets"]));
 			const array = JSON.parse(jsonStr);
 
 			if (!Array.isArray(array)) {

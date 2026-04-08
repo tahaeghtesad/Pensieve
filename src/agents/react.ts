@@ -1,5 +1,6 @@
 import type { OllamaMessage } from "../ollama";
 import type { AgentContext, AgentResult, TraceStep } from "./types";
+import { MalformedToolCallError } from "../tools/registry";
 
 const REACT_FORMAT = `
 ## Response Format
@@ -75,7 +76,26 @@ export async function runReActLoop(
 		}
 
 		// Parse and execute tool call
-		const toolCall = toolRegistry.parseToolCall(responseText);
+		let toolCall;
+		try {
+			toolCall = toolRegistry.parseToolCall(responseText);
+		} catch (e) {
+			if (e instanceof MalformedToolCallError) {
+				// Feed the model a correction prompt instead of treating as raw output
+				const errStep: TraceStep = { type: "error", content: `Malformed tool call JSON: ${e.message}` };
+				traceSteps.push(errStep);
+				onTrace(errStep);
+
+				messages.push({ role: "assistant", content: responseText });
+				messages.push({
+					role: "user",
+					content: `<observation>Error: Malformed JSON in tool call. Your <tool_call> tag contained invalid JSON. Please fix the JSON formatting and try again. Remember: the content inside <tool_call> must be valid JSON like {"name": "tool_name", "arguments": {"key": "value"}}</observation>\n\nContinue.`,
+				});
+				continue;
+			}
+			throw e;
+		}
+
 		if (!toolCall) {
 			// No tags at all — treat raw output as final answer
 			const clean = responseText.replace(/<[^>]+>/g, "").trim();
@@ -100,6 +120,9 @@ export async function runReActLoop(
 		const result = await toolRegistry.execute(toolCall.name, toolCall.arguments, toolCtx, onTrace);
 
 		if (result.affectedFile) affectedFiles.add(result.affectedFile);
+		if (result.affectedFiles) {
+			for (const f of result.affectedFiles) affectedFiles.add(f);
+		}
 
 		const obsStep: TraceStep = {
 			type: "observation",

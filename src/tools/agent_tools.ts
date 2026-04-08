@@ -19,8 +19,13 @@ export const delegateTaskTool: Tool = {
 		if (!intent || !taskDescription) return { success: false, output: "Both intent and task_description are required." };
 
 		try {
-			const finalAnswer = await ctx.subAgentRunner.runSubAgent(intent, taskDescription, onTrace);
-			return { success: true, output: `[Sub-Agent successfully executed task]\nSub-Agent Response:\n\n${finalAnswer}` };
+			const subResult = await ctx.subAgentRunner.runSubAgent(intent, taskDescription, onTrace);
+			return {
+				success: true,
+				output: `[Sub-Agent successfully executed task]\nSub-Agent Response:\n\n${subResult.answer}`,
+				affectedFile: subResult.affectedFiles.length > 0 ? subResult.affectedFiles[0] : undefined,
+				affectedFiles: subResult.affectedFiles.length > 0 ? subResult.affectedFiles : undefined,
+			};
 		} catch (e) {
 			return { success: false, output: `Sub-agent crashed: ${e}` };
 		}

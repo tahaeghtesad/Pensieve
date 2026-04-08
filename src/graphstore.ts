@@ -1,4 +1,4 @@
-import { DataAdapter } from "obsidian";
+import { DataAdapter, Notice } from "obsidian";
 
 export interface GraphEdge {
 	source: string;
@@ -33,6 +33,7 @@ export class GraphStore {
 			}
 		} catch (e) {
 			console.error("Pensieve [GraphStore] Failed to load:", e);
+			new Notice("Pensieve Error: Failed to load knowledge graph — " + (e instanceof Error ? e.message : String(e)), 5000);
 		}
 	}
 
@@ -45,6 +46,7 @@ export class GraphStore {
 			await this.adapter.write(this.storePath, JSON.stringify(data, null, 2));
 		} catch (e) {
 			console.error("Pensieve [GraphStore] Failed to save:", e);
+			new Notice("Pensieve Error: Failed to save knowledge graph — " + (e instanceof Error ? e.message : String(e)), 5000);
 		}
 	}
 
