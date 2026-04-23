@@ -11,10 +11,12 @@ export type IntentType =
 	| "researcher";
 
 export interface TraceStep {
+	id?: string;
 	type: "thought" | "tool_call" | "observation" | "agent_handoff" | "error" | "prompt" | "raw_response";
 	content: string;
 	toolName?: string;
 	toolArgs?: Record<string, unknown>;
+	isComplete?: boolean;
 }
 
 export interface AgentResult {

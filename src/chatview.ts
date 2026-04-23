@@ -302,11 +302,13 @@ export class PensieveChatView extends ItemView {
 		const textNodes: Text[] = [];
 		let node: Text | null;
 		while ((node = walker.nextNode() as Text | null)) {
+			if (node.parentElement && node.parentElement.tagName === "A") continue;
 			textNodes.push(node);
 		}
 
 		// Match file paths: word chars, slashes, spaces, hyphens ending in .md
-		const pathRegex = /(?:^|[\s`"'(])(([\w\s\-./]+\.md))/g;
+		// The preceding boundary now includes `[` to properly catch [[File Name.md]]
+		const pathRegex = /(?:^|[\s`"'(\[])(([\w\s\-./]+\.md))/g;
 
 		for (const textNode of textNodes) {
 			const text = textNode.textContent ?? "";
@@ -320,7 +322,15 @@ export class PensieveChatView extends ItemView {
 			while ((match = pathRegex.exec(text)) !== null) {
 				const fullMatch = match[1]!;
 				const filePath = fullMatch.trim();
-				const matchStart = match.index + (match[0].length - match[1]!.length);
+				let matchStart = match.index + (match[0].length - match[1]!.length);
+				let matchEnd = matchStart + fullMatch.length;
+
+				// Check if wrapped in [[ ]]
+				if (matchStart >= 2 && text.slice(matchStart - 2, matchStart) === "[[" &&
+				    matchEnd <= text.length - 2 && text.slice(matchEnd, matchEnd + 2) === "]]") {
+					matchStart -= 2; // Consume the [[
+					matchEnd += 2;   // Consume the ]]
+				}
 
 				// Add text before the match
 				if (matchStart > lastIndex) {
@@ -338,7 +348,7 @@ export class PensieveChatView extends ItemView {
 				});
 				frag.appendChild(link);
 
-				lastIndex = matchStart + fullMatch.length;
+				lastIndex = matchEnd;
 			}
 
 			if (lastIndex > 0) {
@@ -382,24 +392,53 @@ export class PensieveChatView extends ItemView {
 	}
 
 	private appendTraceStep(step: TraceStep, list: HTMLElement): void {
-		this.traceStepCounter++;
-		// Update the dynamic step indicator in the summary
-		const indicator = list.parentElement?.querySelector(".pensieve-trace-step-indicator");
-		if (indicator) {
-			indicator.textContent = ` (Step ${this.traceStepCounter})...`;
+		let row: HTMLElement | null = null;
+		let isUpdate = false;
+		
+		if (step.id) {
+			const existing = list.querySelector(`[data-trace-id="${step.id}"]`);
+			if (existing instanceof HTMLElement) {
+				row = existing;
+				row.empty(); // Clear existing content to rebuild it
+				isUpdate = true;
+			}
 		}
-		const row = list.createDiv({ cls: `pensieve-trace-step pensieve-trace-${step.type}` });
+
+		if (!isUpdate) {
+			this.traceStepCounter++;
+			// Update the dynamic step indicator in the summary
+			const indicator = list.parentElement?.querySelector(".pensieve-trace-step-indicator");
+			if (indicator) {
+				indicator.textContent = ` (Step ${this.traceStepCounter})...`;
+			}
+			row = list.createDiv({ cls: `pensieve-trace-step pensieve-trace-${step.type}` });
+			if (step.id) row.setAttribute("data-trace-id", step.id);
+		}
+
 		const icons: Record<string, string> = {
 			thought: "💭", tool_call: "🔧", observation: "👁", agent_handoff: "→", error: "⚠️", prompt: "📥"
 		};
-		row.createSpan({ cls: "pensieve-trace-icon", text: icons[step.type] ?? "•" });
-		const body = row.createDiv({ cls: "pensieve-trace-body" });
+		// Show checkmark for completed tool calls
+		row!.createSpan({ 
+			cls: "pensieve-trace-icon", 
+			text: (step.type === "tool_call" && step.isComplete) ? "✅" : (icons[step.type] ?? "•") 
+		});
+		const body = row!.createDiv({ cls: "pensieve-trace-body" });
 
 		if (step.type === "tool_call" && step.toolName) {
 			body.createEl("strong", { text: `Used tool: ${step.toolName}` });
+			
 			if (step.toolArgs && Object.keys(step.toolArgs).length > 0) {
 				const args = body.createEl("pre", { cls: "pensieve-trace-args selectable" });
 				args.createEl("code", { text: JSON.stringify(step.toolArgs, null, 2) });
+			}
+			
+			if (step.content) {
+				const details = body.createEl("details", { cls: "pensieve-trace-details" });
+				details.open = true;
+				details.createEl("summary", { text: step.isComplete ? "Tool Output" : "Status" });
+				const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
+				MarkdownRenderer.render(this.app, step.content, contentDiv, "", this);
 			}
 		} else if (step.type === "observation" || step.type === "prompt") {
 			if (step.type === "prompt") {
@@ -407,7 +446,8 @@ export class PensieveChatView extends ItemView {
 				try {
 					const messages = JSON.parse(step.content) as { role: string; content: string }[];
 					const systemMsg = messages.find(m => m.role === "system");
-					const userMsg = messages.find(m => m.role === "user");
+					const userMessages = messages.filter(m => m.role === "user");
+					const userMsg = userMessages[userMessages.length - 1];
 
 					if (systemMsg) {
 						const sysDetails = body.createEl("details", { cls: "pensieve-trace-details" });

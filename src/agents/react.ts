@@ -86,16 +86,17 @@ export async function runReActLoop(
 				onTrace(thoughtStep);
 			}
 
+			const stepId = "tool_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
 			const callStep: TraceStep = {
+				id: stepId,
 				type: "tool_call",
-				content: `Calling **${toolName}** with arguments: \n\`\`\`json\n${JSON.stringify(toolArgs, null, 2)}\n\`\`\``,
 				toolName,
 				toolArgs,
+				content: "⏳ Waiting for background response...",
+				isComplete: false,
 			};
 			traceSteps.push(callStep);
 			onTrace(callStep);
-
-			onTrace({ type: "observation", content: `⏳ Executing **${toolName}** with args: \`${JSON.stringify(toolArgs)}\` (waiting for background response)...` });
 
 			const result = await toolRegistry.execute(toolName, toolArgs, toolCtx, onTrace);
 
@@ -114,13 +115,9 @@ export async function runReActLoop(
 				};
 			}
 
-			const obsStep: TraceStep = {
-				type: "observation",
-				content: result.output,
-				toolName,
-			};
-			traceSteps.push(obsStep);
-			onTrace(obsStep);
+			callStep.content = result.output;
+			callStep.isComplete = true;
+			onTrace(callStep);
 
 			// Push the assistant's tool call message into history
 			messages.push({
