@@ -73,6 +73,16 @@ export async function runReActLoop(
 		const response = await ollama.chatWithTools(settings.chatModel, messages, toolDefs, ctx.abortSignal);
 		const assistantMsg = response.message;
 
+		const responseText = assistantMsg.content?.trim();
+		const responseStep: TraceStep = {
+			type: "raw_response",
+			content: responseText || (assistantMsg.tool_calls?.length
+				? `Requested tool call: ${assistantMsg.tool_calls.map((call) => call.function.name).join(", ")}`
+				: "Model returned an empty response."),
+		};
+		traceSteps.push(responseStep);
+		onTrace(responseStep);
+
 		// Check for tool calls in the native response
 		if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
 			const toolCall = assistantMsg.tool_calls[0]!;
@@ -177,7 +187,7 @@ export async function runReActLoop(
 
 		// ── No tool call — model is giving a final answer ─────────────────
 		// The model responded with content but no tool calls — this is the answer.
-		if (assistantMsg.content && assistantMsg.content.trim()) {
+		if (responseText) {
 			const thought = toolRegistry.parseThought(assistantMsg.content);
 			if (thought) {
 				const step: TraceStep = { type: "thought", content: thought };

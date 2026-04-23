@@ -661,6 +661,11 @@
 	background: rgba(52, 211, 153, 0.06);
 }
 
+.pensieve-trace-raw_response {
+	border-left-color: var(--pensieve-accent);
+	background: rgba(99, 102, 241, 0.06);
+}
+
 .pensieve-trace-agent_handoff {
 	border-left-color: #60a5fa;
 	background: rgba(96, 165, 250, 0.06);
@@ -684,6 +689,31 @@
 
 .pensieve-trace-body p {
 	margin: 0;
+}
+
+.pensieve-trace-response {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.pensieve-trace-response strong {
+	font-size: 11px;
+	color: var(--pensieve-text-muted);
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+}
+
+.pensieve-trace-response-content {
+	margin-top: 4px;
+	padding: 8px 12px;
+	background: var(--background-primary);
+	border: 1px solid var(--pensieve-border);
+	border-radius: var(--pensieve-radius-sm);
+	font-size: 12px;
+	line-height: 1.55;
+	color: var(--pensieve-text);
 }
 
 .pensieve-trace-args {

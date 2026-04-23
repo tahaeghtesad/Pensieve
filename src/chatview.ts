@@ -416,7 +416,7 @@ export class PensieveChatView extends ItemView {
 		}
 
 		const icons: Record<string, string> = {
-			thought: "💭", tool_call: "🔧", observation: "👁", agent_handoff: "→", error: "⚠️", prompt: "📥"
+			thought: "💭", tool_call: "🔧", observation: "👁", agent_handoff: "→", error: "⚠️", prompt: "📥", raw_response: "💬"
 		};
 		// Show checkmark for completed tool calls
 		row!.createSpan({ 
@@ -425,7 +425,12 @@ export class PensieveChatView extends ItemView {
 		});
 		const body = row!.createDiv({ cls: "pensieve-trace-body" });
 
-		if (step.type === "tool_call" && step.toolName) {
+		if (step.type === "raw_response") {
+			const shell = body.createDiv({ cls: "pensieve-trace-response" });
+			shell.createEl("strong", { text: "Model response" });
+			const content = shell.createDiv({ cls: "pensieve-trace-response-content pensieve-bubble-content selectable" });
+			MarkdownRenderer.render(this.app, step.content, content, "", this);
+		} else if (step.type === "tool_call" && step.toolName) {
 			body.createEl("strong", { text: `Used tool: ${step.toolName}` });
 			
 			if (step.toolArgs && Object.keys(step.toolArgs).length > 0) {
