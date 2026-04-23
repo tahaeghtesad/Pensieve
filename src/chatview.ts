@@ -440,44 +440,39 @@ export class PensieveChatView extends ItemView {
 				const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
 				MarkdownRenderer.render(this.app, step.content, contentDiv, "", this);
 			}
-		} else if (step.type === "observation" || step.type === "prompt") {
-			if (step.type === "prompt") {
-				// Parse the JSON messages and render as two readable boxes
-				try {
-					const messages = JSON.parse(step.content) as { role: string; content: string }[];
-					const systemMsg = messages.find(m => m.role === "system");
-					const userMessages = messages.filter(m => m.role === "user");
-					const userMsg = userMessages[userMessages.length - 1];
+		} else if (step.type === "prompt") {
+			// Parse the JSON messages and render as two readable boxes
+			try {
+				const messages = JSON.parse(step.content) as { role: string; content: string }[];
+				const systemMsg = messages.find(m => m.role === "system");
+				const userMessages = messages.filter(m => m.role === "user");
+				const userMsg = userMessages[userMessages.length - 1];
 
-					if (systemMsg) {
-						const sysDetails = body.createEl("details", { cls: "pensieve-trace-details" });
-						sysDetails.createEl("summary", { text: "System Prompt" });
-						const sysContent = sysDetails.createDiv({ cls: "pensieve-trace-details-content pensieve-trace-prompt-box selectable" });
-						MarkdownRenderer.render(this.app, systemMsg.content, sysContent, "", this);
-					}
-
-					if (userMsg) {
-						const usrDetails = body.createEl("details", { cls: "pensieve-trace-details" });
-						usrDetails.createEl("summary", { text: "User Input" });
-						const usrContent = usrDetails.createDiv({ cls: "pensieve-trace-details-content pensieve-trace-prompt-box selectable" });
-						MarkdownRenderer.render(this.app, userMsg.content, usrContent, "", this);
-					}
-				} catch {
-					// Fallback: render as raw text if JSON parsing fails
-					const details = body.createEl("details", { cls: "pensieve-trace-details" });
-					details.createEl("summary", { text: "System & User Prompt" });
-					const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
-					const pre = contentDiv.createEl("pre", { cls: "pensieve-trace-raw" });
-					pre.createEl("code", { text: step.content });
+				if (systemMsg) {
+					const sysDetails = body.createEl("details", { cls: "pensieve-trace-details" });
+					sysDetails.createEl("summary", { text: "System Prompt" });
+					const sysContent = sysDetails.createDiv({ cls: "pensieve-trace-details-content pensieve-trace-prompt-box selectable" });
+					MarkdownRenderer.render(this.app, systemMsg.content, sysContent, "", this);
 				}
-			} else {
+
+				if (userMsg) {
+					const usrDetails = body.createEl("details", { cls: "pensieve-trace-details" });
+					usrDetails.createEl("summary", { text: "User Input" });
+					const usrContent = usrDetails.createDiv({ cls: "pensieve-trace-details-content pensieve-trace-prompt-box selectable" });
+					MarkdownRenderer.render(this.app, userMsg.content, usrContent, "", this);
+				}
+			} catch {
+				// Fallback: render as raw text if JSON parsing fails
 				const details = body.createEl("details", { cls: "pensieve-trace-details" });
-				details.createEl("summary", { text: "Tool Output" });
+				details.createEl("summary", { text: "System & User Prompt" });
 				const contentDiv = details.createDiv({ cls: "pensieve-trace-details-content selectable" });
-				MarkdownRenderer.render(this.app, step.content, contentDiv, "", this);
+				const pre = contentDiv.createEl("pre", { cls: "pensieve-trace-raw" });
+				pre.createEl("code", { text: step.content });
 			}
 		} else {
-			MarkdownRenderer.render(this.app, step.content, body, "", this);
+			const box = body.createDiv({ cls: "pensieve-trace-details-content selectable" });
+			box.style.marginTop = "2px"; // slightly less margin since there's no summary above it
+			MarkdownRenderer.render(this.app, step.content, box, "", this);
 		}
 	}
 
