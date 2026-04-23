@@ -20,9 +20,14 @@ export const delegateTaskTool: Tool = {
 
 		try {
 			const subResult = await ctx.subAgentRunner.runSubAgent(intent, taskDescription, onTrace);
+			const prettyIntent = intent
+				.split(/[_\s-]+/)
+				.filter(Boolean)
+				.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+				.join(" ") || "Subagent";
 			return {
 				success: true,
-				output: `[Sub-Agent successfully executed task]\nSub-Agent Response:\n\n${subResult.answer}`,
+				output: `[${prettyIntent} Agent successfully executed task]\n${prettyIntent} Agent Response:\n\n${subResult.answer}`,
 				affectedFile: subResult.affectedFiles.length > 0 ? subResult.affectedFiles[0] : undefined,
 				affectedFiles: subResult.affectedFiles.length > 0 ? subResult.affectedFiles : undefined,
 			};

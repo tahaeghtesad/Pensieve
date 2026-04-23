@@ -77,6 +77,13 @@ export default class PensievePlugin extends Plugin {
 			subAgentRunner: {
 				runSubAgent: async (intent: string, query: string, onTrace?: (step: any) => void) => {
 					if (!this.orchestrator) throw new Error("Orchestrator not initialized");
+					const rawIntent = String(intent || "subagent").trim().toLowerCase();
+					const prettyIntent = rawIntent
+						.split(/[_\s-]+/)
+						.filter(Boolean)
+						.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+						.join(" ") || "Subagent";
+					const tracePrefix = `[${prettyIntent} Agent]`;
 					const subCtx = {
 						userQuery: query,
 						chatHistory: [],
@@ -86,7 +93,7 @@ export default class PensievePlugin extends Plugin {
 						ollama: this.ollama,
 						settings: this.settings,
 						onTrace: (step: any) => {
-							if (onTrace) onTrace({ ...step, content: `[Sub-Agent] ${step.content}` });
+							if (onTrace) onTrace({ ...step, content: `${tracePrefix} ${step.content}` });
 						}
 					};
 					const result = await this.orchestrator.runAgent(intent as IntentType, subCtx);
