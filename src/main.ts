@@ -79,26 +79,14 @@ export default class PensievePlugin extends Plugin {
 					if (!this.orchestrator) throw new Error("Orchestrator not initialized");
 					const subCtx = {
 						userQuery: query,
-						chatHistory: [], // Completely blank history!
-						ragContext: "", // No parent RAG noise
+						chatHistory: [],
+						ragContext: `[Parent Agent Context] The parent agent delegated this task to you with the following instructions: "${query}"`,
 						toolCtx: this.toolCtx,
 						toolRegistry: this.toolRegistry,
 						ollama: this.ollama,
 						settings: this.settings,
 						onTrace: (step: any) => {
-							if (onTrace) onTrace(step);
-							else {
-								// Prefix and bubble to parent UI dynamically
-								const childStep = { ...step, type: step.type === "thought" ? "thought" : 
-													 step.type === "prompt" ? "prompt" : 
-													 step.type === "raw_response" ? "raw_response" : 
-													 step.type === "tool_call" ? "tool_call" : 
-													 step.type === "observation" ? "observation" : step.type, 
-													 content: `[Sub-Agent] ${step.content}` };
-								// Wait, the parent UI onTrace is bound in ChatView. 
-								// SubAgents don't have access to the parent ChatView's traceList natively unless passed down!
-								// We'll leave it simple for now, the user requested the output rather than trace flooding.
-							}
+							if (onTrace) onTrace({ ...step, content: `[Sub-Agent] ${step.content}` });
 						}
 					};
 					const result = await this.orchestrator.runAgent(intent as IntentType, subCtx);

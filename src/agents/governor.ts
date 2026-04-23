@@ -22,7 +22,6 @@ Operational guidance:
 - Keep edits deterministic and avoid removing user content.
 - In final answer, report touched files and summarize chronology changes.
 
-Today's date: ${new Date().toISOString()}
-${ctx.toolRegistry.generateSchemaPrompt()}`;
+Today's date: ${new Date().toISOString()}`;
 	}
 }

@@ -6,17 +6,9 @@ import type { ToolContext } from "../tools/types";
 
 export type IntentType =
 	| "direct_chat"
-	| "write_task"
-	| "plan_task"
-	| "review_task"
-	| "factcheck_task"
-	| "organize_task"
-	| "synthesize_task"
-	| "archive_task"
-	| "explore_task"
-	| "govern_task"
-	| "ingest_url"
-	| "garden_task";
+	| "editor"
+	| "librarian"
+	| "researcher";
 
 export interface TraceStep {
 	type: "thought" | "tool_call" | "observation" | "agent_handoff" | "error" | "prompt" | "raw_response";
@@ -29,6 +21,7 @@ export interface AgentResult {
 	answer: string;
 	traceSteps: TraceStep[];
 	affectedFiles: string[];
+	needsUserInput?: boolean;
 }
 
 export interface AgentContext {
@@ -41,14 +34,21 @@ export interface AgentContext {
 	settings: PensieveSettings;
 	onTrace: (step: TraceStep) => void;
 	abortSignal?: { aborted: boolean };
+	allowedTools?: string[];
 }
 
 export abstract class ReActAgent {
 	abstract readonly agentName: string;
 
+	/** Tools this agent is allowed to use. If undefined, all tools are available. */
+	readonly allowedTools?: string[];
+
 	protected abstract buildSystemPrompt(ctx: AgentContext): string;
 
 	async run(ctx: AgentContext): Promise<AgentResult> {
-		return runReActLoop(this.buildSystemPrompt(ctx), ctx);
+		return runReActLoop(this.buildSystemPrompt(ctx), {
+			...ctx,
+			allowedTools: this.allowedTools,
+		});
 	}
 }

@@ -1,11 +1,13 @@
 import { TFile, Vault, Notice } from "obsidian";
 import { OllamaService } from "./ollama";
-import { chunkMarkdown } from "./chunker";
 import { VectorStore, VectorEntry } from "./vectorstore";
 import type { PensieveSettings } from "./settings";
 
 const INDEX_FILE = "pensieve-index.json";
-const EMBED_BATCH_SIZE = 32;
+const EMBED_BATCH_SIZE = 1; // Batch size 1 because we are sending entire unchunked files now
+
+/** Folders excluded from indexing — templates, config, internal data. */
+const EXCLUDED_FOLDERS = [".obsidian/", ".pensieve/", "templates/"];
 
 export type IndexProgressCallback = (
 	status: string,
@@ -24,6 +26,11 @@ export class VaultIndexer {
 	public vectorStore: VectorStore;
 	private indexing = false;
 
+	public progressStatus = "";
+	public progressCurrent = 0;
+	public progressTotal = 0;
+	private progressListeners: IndexProgressCallback[] = [];
+
 	constructor(
 		vault: Vault,
 		ollama: OllamaService,
@@ -39,6 +46,23 @@ export class VaultIndexer {
 		return this.indexing;
 	}
 
+	public addProgressListener(cb: IndexProgressCallback): void {
+		this.progressListeners.push(cb);
+	}
+
+	public removeProgressListener(cb: IndexProgressCallback): void {
+		this.progressListeners = this.progressListeners.filter((l) => l !== cb);
+	}
+
+	private emitProgress(status: string, current: number, total: number): void {
+		this.progressStatus = status;
+		this.progressCurrent = current;
+		this.progressTotal = total;
+		for (const listener of this.progressListeners) {
+			listener(status, current, total);
+		}
+	}
+
 	/**
 	 * Load a previously saved index from the vault's config directory.
 	 */
@@ -49,7 +73,22 @@ export class VaultIndexer {
 			const indexPath = `${configDir}/plugins/pensieve/${INDEX_FILE}`;
 			if (await adapter.exists(indexPath)) {
 				const raw = await adapter.read(indexPath);
-				this.vectorStore = VectorStore.deserialize(raw);
+				const loaded = VectorStore.deserialize(raw);
+
+				// Detect stale indexes from before we removed chunking.
+				// If any entry has chunkIndex (which no longer exists on the type but might in JSON),
+				// the entire index is from the old era and will produce garbage retrieval results.
+				const hasOldEntries = loaded.getAllEntries().some((e: any) => e.chunkIndex !== undefined);
+				if (hasOldEntries) {
+					console.log("[Pensieve] Stale index detected — clearing. A full re-index is needed.");
+					new Notice("Pensieve: Old index detected. Please re-index your vault (click the refresh icon).", 8000);
+					this.vectorStore = new VectorStore();
+					// Delete the stale file
+					await adapter.remove(indexPath);
+					return;
+				}
+
+				this.vectorStore = loaded;
 				console.log(
 					`[Pensieve] Loaded index with ${this.vectorStore.size} entries`
 				);
@@ -93,92 +132,87 @@ export class VaultIndexer {
 		this.indexing = true;
 
 		try {
-			const files = this.vault.getMarkdownFiles();
+			const files = this.vault.getMarkdownFiles()
+				.filter(f => !EXCLUDED_FOLDERS.some(ex => f.path.toLowerCase().startsWith(ex)));
 			const total = files.length;
 			let current = 0;
 
-			// Remove entries for deleted files
-			const currentPaths = new Set(files.map((f) => f.path));
-			for (const indexed of this.vectorStore.getIndexedFiles()) {
-				if (!currentPaths.has(indexed)) {
-					this.vectorStore.removeByFile(indexed);
-				}
-			}
+			// User requested: old indexes should automatically be removed on refresh.
+			this.vectorStore.clear();
+			await this.saveIndex();
 
-			// Batch of chunks waiting to be embedded
-			let pendingChunks: {
+			// Batch of documents waiting to be embedded
+			let pendingDocs: {
 				filePath: string;
-				chunkIndex: number;
 				text: string;
 				lastModified: number;
 				ctime: number;
 			}[] = [];
 
 			const flushPending = async () => {
-				if (pendingChunks.length === 0) return;
+				if (pendingDocs.length === 0) return;
 
 				// Batch embed
-				const texts = pendingChunks.map(
-					(c) => "search_document: " + c.text
+				const texts = pendingDocs.map(
+					(doc) => "search_document: " + doc.text
 				);
-				const embeddings = await this.ollama.embed(
-					this.settings.embeddingModel,
-					texts
-				);
+				
+				let embeddings: number[][] = [];
+				try {
+					embeddings = await this.ollama.embed(
+						this.settings.embeddingModel,
+						texts
+					);
+				} catch (e: any) {
+					// Fallback for 400 errors (context window exceeded for massive files)
+					if (e.message && e.message.includes("400")) {
+						console.warn("[Pensieve] 400 Error on full file embed. Truncating to 50,000 chars and retrying...", e);
+						const truncatedTexts = texts.map(t => t.substring(0, 50000));
+						embeddings = await this.ollama.embed(
+							this.settings.embeddingModel,
+							truncatedTexts
+						);
+					} else {
+						throw e;
+					}
+				}
 
-				const entries: VectorEntry[] = pendingChunks.map((c, i) => ({
-					id: `${c.filePath}::${c.chunkIndex}`,
-					filePath: c.filePath,
-					chunkIndex: c.chunkIndex,
-					text: c.text,
+				const entries: VectorEntry[] = pendingDocs.map((doc, i) => ({
+					id: doc.filePath,
+					filePath: doc.filePath,
+					text: doc.text,
 					embedding: embeddings[i] ?? [],
-					lastModified: c.lastModified,
-					ctime: c.ctime,
+					lastModified: doc.lastModified,
+					ctime: doc.ctime,
 				}));
 
 				this.vectorStore.addEntries(entries);
-				pendingChunks = [];
+				pendingDocs = [];
 			};
 
 			for (const file of files) {
 				current++;
-				onProgress?.(
+				this.emitProgress(
 					`Indexing: ${file.path}`,
 					current,
 					total
 				);
+				onProgress?.(`Indexing: ${file.path}`, current, total);
 
-				// Skip unchanged files
-				if (
-					this.vectorStore.hasFile(file.path, file.stat.mtime)
-				) {
-					continue;
-				}
-
-				// Re-index this file
-				this.vectorStore.removeByFile(file.path);
+				// Since we cleared the index above, we don't need to skip unchanged files
+				// or remove them here. We just index everything fresh.
 				const content = await this.vault.cachedRead(file);
-				const chunks = chunkMarkdown(
-					content,
-					this.settings.chunkSize,
-					this.settings.chunkOverlap
-				);
+				const noteText = content.trim() || "Empty note";
 
-				for (let ci = 0; ci < chunks.length; ci++) {
-					const chunk = chunks[ci];
-					if (!chunk) continue;
+				pendingDocs.push({
+					filePath: file.path,
+					text: noteText,
+					lastModified: file.stat.mtime,
+					ctime: file.stat.ctime,
+				});
 
-					pendingChunks.push({
-						filePath: file.path,
-						chunkIndex: ci,
-						text: chunk.text,
-						lastModified: file.stat.mtime,
-						ctime: file.stat.ctime,
-					});
-
-					if (pendingChunks.length >= EMBED_BATCH_SIZE) {
-						await flushPending();
-					}
+				if (pendingDocs.length >= EMBED_BATCH_SIZE) {
+					await flushPending();
 				}
 			}
 
@@ -186,9 +220,10 @@ export class VaultIndexer {
 			await flushPending();
 			await this.saveIndex();
 
+			this.emitProgress("Indexing complete", total, total);
 			onProgress?.("Indexing complete", total, total);
 			new Notice(
-				`Pensieve: Indexed ${total} files (${this.vectorStore.size} chunks)`
+				`Pensieve: Indexed ${total} files (${this.vectorStore.size} documents)`
 			);
 		} catch (e) {
 			console.error("[Pensieve] Indexing error:", e);
@@ -203,33 +238,44 @@ export class VaultIndexer {
 	 */
 	async indexFile(file: TFile): Promise<void> {
 		if (file.extension !== "md") return;
+		if (EXCLUDED_FOLDERS.some(ex => file.path.toLowerCase().startsWith(ex))) return;
 
 		try {
 			this.vectorStore.removeByFile(file.path);
 			const content = await this.vault.cachedRead(file);
-			const chunks = chunkMarkdown(
-				content,
-				this.settings.chunkSize,
-				this.settings.chunkOverlap
-			);
+			const noteText = content.trim() || "Empty note";
 
-			if (chunks.length === 0) return;
+			if (!noteText) return;
 
-			const texts = chunks.map((c) => "search_document: " + c.text);
-			const embeddings = await this.ollama.embed(
-				this.settings.embeddingModel,
-				texts
-			);
+			const texts = ["search_document: " + noteText];
+			
+			let embeddings: number[][] = [];
+			try {
+				embeddings = await this.ollama.embed(
+					this.settings.embeddingModel,
+					texts
+				);
+			} catch (e: any) {
+				if (e.message && e.message.includes("400")) {
+					console.warn(`[Pensieve] 400 Error indexing ${file.path}. Truncating to 50,000 chars and retrying...`);
+					const truncatedTexts = texts.map(t => t.substring(0, 50000));
+					embeddings = await this.ollama.embed(
+						this.settings.embeddingModel,
+						truncatedTexts
+					);
+				} else {
+					throw e;
+				}
+			}
 
-			const entries: VectorEntry[] = chunks.map((c, i) => ({
-				id: `${file.path}::${i}`,
+			const entries: VectorEntry[] = [{
+				id: file.path,
 				filePath: file.path,
-				chunkIndex: i,
-				text: c.text,
-				embedding: embeddings[i] ?? [],
+				text: noteText,
+				embedding: embeddings[0] ?? [],
 				lastModified: file.stat.mtime,
 				ctime: file.stat.ctime,
-			}));
+			}];
 
 			this.vectorStore.addEntries(entries);
 			await this.saveIndex();

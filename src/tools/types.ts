@@ -47,6 +47,8 @@ export interface ToolResult {
 	affectedFiles?: string[];
 	executedAt?: number;
 	durationMs?: number;
+	/** If true, the ReAct loop should yield and present this output as a question to the user. */
+	askUser?: boolean;
 }
 
 export interface Tool {

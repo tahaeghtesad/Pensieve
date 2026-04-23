@@ -51,12 +51,12 @@ export const getTemporalContextTool: Tool = {
 		scored.sort((a, b) => b.score - a.score);
 		const top = scored.slice(0, topK);
 
-		const resultChunks = top.map(s => {
+		const resultDocs = top.map(s => {
 			return `[File: ${s.entry.filePath} | Age: ${Math.round(s.ageDays)}d | Decayed Context Score: ${s.score.toFixed(3)}]\n${s.entry.text}`;
 		}).join("\n\n---\n\n");
 
-		if (resultChunks.length === 0) return { success: true, output: "No context found." };
-		return { success: true, output: resultChunks };
+		if (resultDocs.length === 0) return { success: true, output: "No context found." };
+		return { success: true, output: resultDocs };
 	}
 };
 
@@ -119,7 +119,7 @@ ${context}
 
 		// Since .pensieve is hidden, we manually inject it into the VectorStore here so temporal_context sees it immediately!
 		try {
-			const chunks = (await import("../chunker")).chunkMarkdown(summary, ctx.settings.chunkSize, ctx.settings.chunkOverlap);
+			const chunks = [{ text: summary.trim() || "Empty memory" }];
 			const texts = chunks.map(c => "search_document: " + c.text);
 			const embeds = await ctx.ollama.embed(ctx.settings.embeddingModel, texts);
 			

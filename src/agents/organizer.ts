@@ -19,8 +19,6 @@ Your goal is to actively enforce structural knowledge management (e.g., PARA, Ze
 - If the user asks for a blueprint *first*, generate the blueprint. If they ask to *execute* the blueprint, immediately trace through moving the files.
 - Return a clear, formatted summary of what structural operations you performed in your <final_answer>.
 
-${ctx.toolRegistry.generateSchemaPrompt()}
-
 # Current Vault Context:
 Settings: ${JSON.stringify(ctx.settings)}
 Date: ${new Date().toISOString()}`;

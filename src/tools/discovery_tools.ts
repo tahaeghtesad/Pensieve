@@ -122,7 +122,52 @@ export const evaluateInformationGainTool: Tool = {
 	}
 };
 
+export const findOrphanNotesTool: Tool = {
+	name: "find_orphan_notes",
+	description: "Deterministically find orphan notes — markdown files with zero incoming links from any other note. Returns the list immediately without LLM reasoning. Use reparent_orphan_nodes to fix them.",
+	parameters: [
+		{ name: "folder", type: "string", description: "Optional folder to scope the search (e.g. 'Research')", required: false },
+		{ name: "max_results", type: "number", description: "Maximum orphans to return (default 20)", required: false },
+	],
+	async execute(args, ctx): Promise<ToolResult> {
+		const folder = args["folder"] ? String(args["folder"]) : null;
+		const maxResults = Number(args["max_results"]) || 20;
+		const resolvedLinks = ctx.app.metadataCache.resolvedLinks;
+
+		// Build set of all markdown files
+		const allFiles = ctx.vault.getMarkdownFiles()
+			.filter(f => !f.path.startsWith(".obsidian/") && !f.path.startsWith(".pensieve/"))
+			.filter(f => folder ? f.path.startsWith(folder) : true);
+
+		const allPaths = new Set(allFiles.map(f => f.path));
+
+		// Build set of files that have at least one incoming link
+		const hasIncoming = new Set<string>();
+		for (const [_sourcePath, linksOut] of Object.entries(resolvedLinks)) {
+			for (const targetPath of Object.keys(linksOut)) {
+				hasIncoming.add(targetPath);
+			}
+		}
+
+		// Orphans = files with no incoming links
+		const orphans = [...allPaths]
+			.filter(p => !hasIncoming.has(p))
+			.slice(0, maxResults);
+
+		if (orphans.length === 0) {
+			return { success: true, output: "No orphan notes found. All notes have at least one incoming link." };
+		}
+
+		const formatted = orphans.map(p => `- [[${p}]]`).join("\n");
+		return {
+			success: true,
+			output: `Found ${orphans.length} orphan note(s) with zero incoming links:\n${formatted}\n\nUse reparent_orphan_nodes to add links to these notes.`,
+		};
+	}
+};
+
 export function registerDiscoveryTools(registry: import("./registry").ToolRegistry): void {
 	registry.register(calculateStructuralHolesTool);
 	registry.register(evaluateInformationGainTool);
+	registry.register(findOrphanNotesTool);
 }

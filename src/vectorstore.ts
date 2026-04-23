@@ -4,7 +4,6 @@ import { Notice } from "obsidian";
 export interface VectorEntry {
 	id: string;
 	filePath: string;
-	chunkIndex: number;
 	text: string;
 	embedding: number[];
 	lastModified: number;
@@ -88,15 +87,42 @@ export class VectorStore {
 
 	/**
 	 * Search for the top-K most similar entries to the query embedding.
+	 * Non-blocking: yields to the event loop between batches to prevent UI freezing.
 	 */
-	search(queryEmbedding: number[], topK: number): ScoredEntry[] {
-		const scored: ScoredEntry[] = this.entries.map((entry) => ({
-			entry,
-			score: cosineSimilarity(queryEmbedding, entry.embedding),
-		}));
+	async search(queryEmbedding: number[], topK: number): Promise<ScoredEntry[]> {
+		const BATCH_SIZE = 500;
+		const topResults: ScoredEntry[] = [];
+		let minTopScore = -Infinity;
 
-		scored.sort((a, b) => b.score - a.score);
-		return scored.slice(0, topK);
+		for (let i = 0; i < this.entries.length; i += BATCH_SIZE) {
+			const end = Math.min(i + BATCH_SIZE, this.entries.length);
+
+			for (let j = i; j < end; j++) {
+				const entry = this.entries[j]!;
+				const score = cosineSimilarity(queryEmbedding, entry.embedding);
+
+				if (topResults.length < topK) {
+					topResults.push({ entry, score });
+					if (topResults.length === topK) {
+						topResults.sort((a, b) => b.score - a.score);
+						minTopScore = topResults[topResults.length - 1]!.score;
+					}
+				} else if (score > minTopScore) {
+					// Replace the lowest-scoring entry
+					topResults[topResults.length - 1] = { entry, score };
+					topResults.sort((a, b) => b.score - a.score);
+					minTopScore = topResults[topResults.length - 1]!.score;
+				}
+			}
+
+			// Yield to event loop between batches to prevent UI freezing
+			if (end < this.entries.length) {
+				await new Promise<void>(r => setTimeout(r, 0));
+			}
+		}
+
+		topResults.sort((a, b) => b.score - a.score);
+		return topResults;
 	}
 
 	/** Serialize to JSON string. */

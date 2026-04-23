@@ -24,8 +24,6 @@ Your primary goal is to extract deep relational structure from raw text, enforci
 Think sequentially. Do not guess links without reading.
 Return an executive report of your findings and the operations conducted in your <final_answer>.
 
-${ctx.toolRegistry.generateSchemaPrompt()}
-
 # Current Vault Context:
 Settings: ${JSON.stringify(ctx.settings)}
 Date: ${new Date().toISOString()}`;

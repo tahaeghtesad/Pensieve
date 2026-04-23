@@ -23,10 +23,35 @@ export class PensieveChatView extends ItemView {
 	private showingSessions = false;
 	private isGenerating = false;
 	private abortSignal = { aborted: false };
+	
+	private globalProgressContainer!: HTMLElement;
+	private globalProgressFill!: HTMLElement;
+	private globalProgressLabel!: HTMLElement;
+	
+	private boundProgressListener: (s: string, c: number, t: number) => void;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PensievePlugin) {
 		super(leaf);
 		this.plugin = plugin;
+		
+		this.boundProgressListener = (status, cur, total) => {
+			if (!this.globalProgressContainer) return;
+			
+			if (status === "Indexing complete" || status.includes("failed")) {
+				setTimeout(() => {
+					if (this.globalProgressContainer) this.globalProgressContainer.classList.add("hidden");
+				}, 2000);
+			} else {
+				this.globalProgressContainer.classList.remove("hidden");
+			}
+			
+			if (this.globalProgressFill) {
+				this.globalProgressFill.style.width = `${total > 0 ? (cur / total) * 100 : 0}%`;
+			}
+			if (this.globalProgressLabel) {
+				this.globalProgressLabel.setText(status);
+			}
+		};
 	}
 
 	getViewType(): string { return VIEW_TYPE_PENSIEVE_CHAT; }
@@ -57,6 +82,12 @@ export class PensieveChatView extends ItemView {
 		mkBtn("history", "Chat History", () => this.toggleSessionList());
 		mkBtn("refresh-cw", "Reindex Vault", () => this.onReindex());
 
+		// Global Progress Bar
+		this.globalProgressContainer = root.createDiv({ cls: "pensieve-progress hidden" });
+		const barWrap = this.globalProgressContainer.createDiv({ cls: "pensieve-progress-bar" });
+		this.globalProgressFill = barWrap.createDiv({ cls: "pensieve-progress-fill" });
+		this.globalProgressLabel = this.globalProgressContainer.createDiv({ cls: "pensieve-progress-text", text: "Ready" });
+
 		this.sessionListEl = root.createDiv({ cls: "pensieve-session-list hidden" });
 		this.chatContainer = root.createDiv({ cls: "pensieve-chat" });
 		this.inputArea = root.createDiv({ cls: "pensieve-input-area" });
@@ -85,9 +116,22 @@ export class PensieveChatView extends ItemView {
 
 		this.renderAllMessages();
 		this.checkOllamaStatus();
+		
+		this.plugin.indexer.addProgressListener(this.boundProgressListener);
+		
+		if (this.plugin.indexer.isIndexing) {
+			this.boundProgressListener(
+				this.plugin.indexer.progressStatus, 
+				this.plugin.indexer.progressCurrent, 
+				this.plugin.indexer.progressTotal
+			);
+		}
 	}
 
-	async onClose(): Promise<void> { if (this.abortSignal) this.abortSignal.aborted = true; }
+	async onClose(): Promise<void> { 
+		if (this.abortSignal) this.abortSignal.aborted = true; 
+		this.plugin.indexer.removeProgressListener(this.boundProgressListener);
+	}
 
 	// ── Status ────────────────────────────────────────────────
 	private async checkOllamaStatus(): Promise<void> {
@@ -446,12 +490,12 @@ export class PensieveChatView extends ItemView {
 			this.appendTraceStep({ type: "observation", content: "Retrieving relevant context from vault..." }, traceList);
 			this.scrollToBottom();
 			
-			const chunks = await this.plugin.retriever.retrieve(text);
-			const context = this.plugin.retriever.buildContext(chunks);
-			const sources: string[] = Array.from(new Set(chunks.map((c: { filePath: string }) => c.filePath)));
+			const docs = await this.plugin.retriever.retrieve(text);
+			const context = this.plugin.retriever.buildContext(docs);
+			const sources: string[] = Array.from(new Set(docs.map((c: { filePath: string }) => c.filePath)));
 			
-			if (chunks.length > 0) {
-				this.appendTraceStep({ type: "observation", content: `Retrieved ${chunks.length} notes as context.` }, traceList);
+			if (docs.length > 0) {
+				this.appendTraceStep({ type: "observation", content: `Retrieved ${docs.length} notes as context.` }, traceList);
 			}
 
 			const history = this.plugin.chatHistory.getOllamaHistory();
@@ -465,116 +509,60 @@ export class PensieveChatView extends ItemView {
 			this.appendTraceStep({ type: "agent_handoff", content: `Routed to **${intent}**` }, traceList);
 			this.scrollToBottom();
 
-			if (intent === "direct_chat") {
-				this.plugin.toolCtx.temporalContext = {
-					sessionId: activeSession.id,
-					intent,
-					agentName: "direct_chat",
-					eventType: "chat",
-				};
-				traceWrap.open = false; // Hide trace container for simple chat
-				traceToggle.setText(`⚙ System Trace (${traceList.children.length} steps) — click to expand`);
-				
-				// ── Streaming Q&A (unchanged) ────────────────────
-				const messages = this.plugin.retriever.buildMessages(
-					this.plugin.settings.systemPrompt, context, history, text
-				);
-				const assistantMsg: ChatMessage = {
-					role: "assistant", content: "",
-					sources: sources.length > 0 ? sources : undefined, timestamp: Date.now(),
-				};
-				this.plugin.chatHistory.addMessage(assistantMsg);
-				typing.remove();
+			// ── All intents go through the agentic path ─────────────────
+			this.plugin.toolCtx.temporalContext = {
+				sessionId: activeSession.id,
+				intent,
+				agentName: intent,
+				eventType: intent === "direct_chat" ? "chat" : "agent_run",
+			};
+			typing.remove();
 
-				const bubble = this.appendMessageBubble(assistantMsg);
-				const contentEl = bubble.querySelector(".pensieve-bubble-content") as HTMLElement;
-				let fullContent = "";
-				let renderPending = false;
-				let renderTimer: ReturnType<typeof setTimeout> | null = null;
-
-				const flushRender = () => {
-					renderPending = false;
-					contentEl.empty();
-					contentEl.textContent = fullContent;
+			const agentCtx: AgentContext = {
+				userQuery: text,
+				chatHistory: history,
+				ragContext: context,
+				toolCtx: this.plugin.toolCtx,
+				toolRegistry: this.plugin.toolRegistry,
+				ollama: this.plugin.ollama,
+				settings: this.plugin.settings,
+				abortSignal: this.abortSignal,
+				onTrace: (step: TraceStep) => {
+					this.appendTraceStep(step, traceList);
 					this.scrollToBottom();
-				};
+				},
+			};
 
-				await this.plugin.ollama.chat(this.plugin.settings.chatModel, messages, (token: string) => {
-					fullContent += token;
-					if (!renderPending) {
-						renderPending = true;
-						if (renderTimer) clearTimeout(renderTimer);
-						renderTimer = setTimeout(flushRender, 100);
-					}
-				}, this.abortSignal);
+			const result = await this.plugin.orchestrator.runAgentWithReflection(intent, agentCtx);
 
-				// Final full markdown render after stream completes
-				if (renderTimer) clearTimeout(renderTimer);
-				contentEl.empty();
-				MarkdownRenderer.render(this.app, fullContent, contentEl, "", this);
+			// Update trace toggle label and collapse it
+			traceWrap.open = false;
+			traceToggle.setText(`⚙ Reasoning (${result.traceSteps.length} steps) — click to expand`);
 
-				this.plugin.chatHistory.updateLastAssistantMessage(fullContent, sources.length > 0 ? sources : undefined);
+			// Render final answer bubble
+			const assistantMsg: ChatMessage = {
+				role: "assistant",
+				content: result.answer,
+				sources: sources.length > 0 ? sources : undefined,
+				affectedFiles: result.affectedFiles.length > 0 ? result.affectedFiles : undefined,
+				timestamp: Date.now(),
+			};
+			this.plugin.chatHistory.addMessage(assistantMsg);
+			this.appendMessageBubble(assistantMsg);
 
-				// Fire trailing memory integration empty
-				this.plugin.compactor.checkAndCompact();
-
-			} else {
-				// ── Agentic path ─────────────────────────────────
-				this.plugin.toolCtx.temporalContext = {
-					sessionId: activeSession.id,
-					intent,
-					agentName: intent,
-					eventType: "agent_run",
-				};
-				typing.remove();
-				// Trace container already created and open; we just keep appending to it!
-
-				const agentCtx: AgentContext = {
-					userQuery: text,
-					chatHistory: history,
-					ragContext: context,
-					toolCtx: this.plugin.toolCtx,
-					toolRegistry: this.plugin.toolRegistry,
-					ollama: this.plugin.ollama,
-					settings: this.plugin.settings,
-					abortSignal: this.abortSignal,
-					onTrace: (step: TraceStep) => {
-						this.appendTraceStep(step, traceList);
-						this.scrollToBottom();
-					},
-				};
-
-				const result = await this.plugin.orchestrator.runAgent(intent, agentCtx);
-
-				// Update trace toggle label and collapse it
-				traceWrap.open = false;
-				traceToggle.setText(`⚙ Reasoning (${result.traceSteps.length} steps) — click to expand`);
-
-				// Render final answer bubble
-				const assistantMsg: ChatMessage = {
-					role: "assistant",
-					content: result.answer,
-					sources: sources.length > 0 ? sources : undefined,
-					affectedFiles: result.affectedFiles.length > 0 ? result.affectedFiles : undefined,
-					timestamp: Date.now(),
-				};
-				this.plugin.chatHistory.addMessage(assistantMsg);
-				this.appendMessageBubble(assistantMsg);
-
-				// Re-index modified files
-				for (const fp of result.affectedFiles) {
-					const file = this.app.vault.getAbstractFileByPath(fp);
-					if (file instanceof TFile) {
-						await this.plugin.indexer.indexFile(file);
-					}
+			// Re-index modified files
+			for (const fp of result.affectedFiles) {
+				const file = this.app.vault.getAbstractFileByPath(fp);
+				if (file instanceof TFile) {
+					await this.plugin.indexer.indexFile(file);
 				}
-				if (result.affectedFiles.length > 0) {
-					this.plugin.retriever.setVectorStore(this.plugin.indexer.vectorStore);
-				}
-
-				// Fire trailing memory integration asynchronous loop
-				this.plugin.compactor.checkAndCompact();
 			}
+			if (result.affectedFiles.length > 0) {
+				this.plugin.retriever.setVectorStore(this.plugin.indexer.vectorStore);
+			}
+
+			// Fire trailing memory integration
+			this.plugin.compactor.scheduleCompaction();
 		} catch (e) {
 			typing.remove();
 			const errMsg: ChatMessage = {
@@ -596,17 +584,12 @@ export class PensieveChatView extends ItemView {
 
 	// ── Reindex ───────────────────────────────────────────────
 	private async onReindex(): Promise<void> {
-		const prog = this.chatContainer.createDiv({ cls: "pensieve-progress" });
-		const fill = prog.createDiv({ cls: "pensieve-progress-bar" }).createDiv({ cls: "pensieve-progress-fill" });
-		const label = prog.createDiv({ cls: "pensieve-progress-text", text: "Starting index..." });
-		this.scrollToBottom();
-
-		await this.plugin.indexer.indexVault((status: string, cur: number, total: number) => {
-			fill.style.width = `${total > 0 ? (cur / total) * 100 : 0}%`;
-			label.setText(status);
-		});
+		this.globalProgressContainer.classList.remove("hidden");
+		this.globalProgressLabel.setText("Starting index...");
+		this.globalProgressFill.style.width = "0%";
+		
+		await this.plugin.indexer.indexVault();
 		this.plugin.retriever.setVectorStore(this.plugin.indexer.vectorStore);
-		setTimeout(() => prog.remove(), 2000);
 	}
 
 	private scrollToBottom(): void {

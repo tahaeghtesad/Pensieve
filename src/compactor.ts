@@ -6,6 +6,9 @@ import { ensureFolder } from "./tools/notetools";
 
 export class MemoryCompactor {
 	private isCompacting = false;
+	private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+	private readonly DEBOUNCE_MS = 5000;
+	private readonly MIN_NEW_MESSAGES = 4;
 
 	constructor(
 		private vault: Vault,
@@ -15,13 +18,28 @@ export class MemoryCompactor {
 	) {}
 
 	/**
+	 * Schedule compaction with debouncing. Multiple calls within the window
+	 * reset the timer, preventing race conditions from rapid messages.
+	 */
+	public scheduleCompaction(): void {
+		if (this.debounceTimer) clearTimeout(this.debounceTimer);
+		this.debounceTimer = setTimeout(() => {
+			this.debounceTimer = null;
+			this.checkAndCompact();
+		}, this.DEBOUNCE_MS);
+	}
+
+	/**
 	 * Checks if the active session requires summary compaction.
 	 * If so, fires an asynchronous background LLM process.
 	 */
 	public async checkAndCompact(): Promise<void> {
 		const session = this.chatHistory.getActiveSession();
 		
-		// Run every time a message resolves to keep the summary perpetually rolling
+		// Only compact if enough new messages have accumulated
+		const messagesSinceLastCompaction = session.messages.length - (session.summaryIteration ?? 0);
+		if (messagesSinceLastCompaction < this.MIN_NEW_MESSAGES) return;
+
 		if (this.isCompacting) return;
 		this.isCompacting = true;
 		try {

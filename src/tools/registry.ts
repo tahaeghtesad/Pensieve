@@ -1,4 +1,5 @@
 import type { Tool, ToolContext, ToolResult } from "./types";
+import type { OllamaToolDef } from "../ollama";
 
 export interface ParsedToolCall {
 	name: string;
@@ -71,6 +72,42 @@ export class ToolRegistry {
 			return `### ${t.name}\n${t.description}\nParameters:\n${params}`;
 		}).join("\n\n");
 		return `\n\n## Available Tools\n\n${defs}`;
+	}
+
+	/**
+	 * Generate Ollama-native tool definitions for the /api/chat `tools` parameter.
+	 * If `toolNames` is provided, only include those specific tools (for per-agent scoping).
+	 */
+	generateOllamaToolDefs(toolNames?: string[]): OllamaToolDef[] {
+		const tools = toolNames
+			? toolNames.map(n => this.tools.get(n)).filter((t): t is Tool => t !== undefined)
+			: this.getAll();
+
+		return tools.map((t) => {
+			const required: string[] = [];
+			const properties: Record<string, { type: string; description: string }> = {};
+
+			for (const p of t.parameters) {
+				properties[p.name] = {
+					type: p.type,
+					description: p.description,
+				};
+				if (p.required) required.push(p.name);
+			}
+
+			return {
+				type: "function" as const,
+				function: {
+					name: t.name,
+					description: t.description,
+					parameters: {
+						type: "object" as const,
+						required,
+						properties,
+					},
+				},
+			};
+		});
 	}
 
 	parseToolCall(text: string): ParsedToolCall | null {

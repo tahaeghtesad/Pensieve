@@ -19,8 +19,6 @@ Standard top-K vector retrieval fails as a vault grows because older context is 
 - If asked to do deep historical retrieval, exclusively invoke your \`get_temporal_context\` tool.
 - Return a summary of what you successfully consolidated or retrieved in your <final_answer>.
 
-${ctx.toolRegistry.generateSchemaPrompt()}
-
 # Current Vault Context:
 Settings: ${JSON.stringify(ctx.settings)}
 Date: ${new Date().toISOString()}`;

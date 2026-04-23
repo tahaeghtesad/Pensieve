@@ -2,8 +2,8 @@ import { OllamaService, OllamaMessage } from "./ollama";
 import { VectorStore, ScoredEntry } from "./vectorstore";
 import type { PensieveSettings } from "./settings";
 
-/** A retrieved chunk with its source info and relevance score. */
-export interface RetrievedChunk {
+/** A retrieved document with its source info and relevance score. */
+export interface RetrievedDocument {
 	text: string;
 	filePath: string;
 	score: number;
@@ -34,9 +34,9 @@ export class Retriever {
 	}
 
 	/**
-	 * Retrieve the top-K most relevant chunks for a given query.
+	 * Retrieve the top-K most relevant documents for a given query.
 	 */
-	async retrieve(query: string): Promise<RetrievedChunk[]> {
+	async retrieve(query: string): Promise<RetrievedDocument[]> {
 		if (this.vectorStore.size === 0) {
 			return [];
 		}
@@ -50,7 +50,7 @@ export class Retriever {
 		const queryEmbedding = embeddings[0];
 		if (!queryEmbedding) return [];
 
-		const results: ScoredEntry[] = this.vectorStore.search(
+		const results: ScoredEntry[] = await this.vectorStore.search(
 			queryEmbedding,
 			this.settings.topK
 		);
@@ -63,14 +63,14 @@ export class Retriever {
 	}
 
 	/**
-	 * Format retrieved chunks into a context block that's included in the
+	 * Format retrieved documents into a context block that's included in the
 	 * system/user message to the LLM.
 	 */
-	buildContext(chunks: RetrievedChunk[]): string {
-		if (chunks.length === 0) return "";
+	buildContext(docs: RetrievedDocument[]): string {
+		if (docs.length === 0) return "";
 
-		const sections = chunks.map((c, i) => {
-			return `--- Context ${i + 1} (from [[${c.filePath}]], relevance: ${c.score.toFixed(3)}) ---\n${c.text}`;
+		const sections = docs.map((doc, i) => {
+			return `--- Context ${i + 1} (from [[${doc.filePath}]], relevance: ${doc.score.toFixed(3)}) ---\n${doc.text}`;
 		});
 
 		return (

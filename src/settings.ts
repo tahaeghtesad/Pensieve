@@ -5,8 +5,6 @@ export interface PensieveSettings {
 	ollamaUrl: string;
 	chatModel: string;
 	embeddingModel: string;
-	chunkSize: number;
-	chunkOverlap: number;
 	topK: number;
 	systemPrompt: string;
 	maxChatHistory: number;
@@ -21,8 +19,6 @@ export const DEFAULT_SETTINGS: PensieveSettings = {
 	ollamaUrl: "http://localhost:11434",
 	chatModel: "gemma4:e2b",
 	embeddingModel: "nomic-embed-text",
-	chunkSize: 500,
-	chunkOverlap: 50,
 	topK: 5,
 	agentEnabled: true,
 	maxAgentIterations: 10,
@@ -98,40 +94,8 @@ export class PensieveSettingTab extends PluginSettingTab {
 		containerEl.createEl("h3", { text: "RAG Parameters" });
 
 		new Setting(containerEl)
-			.setName("Chunk size")
-			.setDesc("Maximum number of characters per text chunk")
-			.addText((text) =>
-				text
-					.setPlaceholder("500")
-					.setValue(String(this.plugin.settings.chunkSize))
-					.onChange(async (value) => {
-						const n = parseInt(value, 10);
-						if (!isNaN(n) && n > 0) {
-							this.plugin.settings.chunkSize = n;
-							await this.plugin.saveSettings();
-						}
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Chunk overlap")
-			.setDesc("Character overlap between adjacent chunks")
-			.addText((text) =>
-				text
-					.setPlaceholder("50")
-					.setValue(String(this.plugin.settings.chunkOverlap))
-					.onChange(async (value) => {
-						const n = parseInt(value, 10);
-						if (!isNaN(n) && n >= 0) {
-							this.plugin.settings.chunkOverlap = n;
-							await this.plugin.saveSettings();
-						}
-					})
-			);
-
-		new Setting(containerEl)
 			.setName("Top K results")
-			.setDesc("Number of context chunks to retrieve per query")
+			.setDesc("Number of documents to retrieve per query")
 			.addText((text) =>
 				text
 					.setPlaceholder("5")
