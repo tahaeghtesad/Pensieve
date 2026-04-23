@@ -95,7 +95,7 @@ export async function runReActLoop(
 			traceSteps.push(callStep);
 			onTrace(callStep);
 
-			onTrace({ type: "observation", content: "⏳ Executing tool (waiting for background response)..." });
+			onTrace({ type: "observation", content: `⏳ Executing **${toolName}** with args: \`${JSON.stringify(toolArgs)}\` (waiting for background response)...` });
 
 			const result = await toolRegistry.execute(toolName, toolArgs, toolCtx, onTrace);
 

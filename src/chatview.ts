@@ -486,16 +486,32 @@ export class PensieveChatView extends ItemView {
 		this.scrollToBottom();
 
 		try {
-			// RAG context (used by both paths)
-			this.appendTraceStep({ type: "observation", content: "Retrieving relevant context from vault..." }, traceList);
-			this.scrollToBottom();
+			const isFirstMessage = activeSession.messages.filter(m => m.role === "user").length === 1;
 			
-			const docs = await this.plugin.retriever.retrieve(text);
-			const context = this.plugin.retriever.buildContext(docs);
-			const sources: string[] = Array.from(new Set(docs.map((c: { filePath: string }) => c.filePath)));
+			let context = "";
+			let sources: string[] = [];
 			
-			if (docs.length > 0) {
-				this.appendTraceStep({ type: "observation", content: `Retrieved ${docs.length} notes as context.` }, traceList);
+			if (isFirstMessage) {
+				// RAG context (only done automatically on the first message)
+				this.appendTraceStep({ type: "observation", content: "Retrieving initial context from vault..." }, traceList);
+				this.scrollToBottom();
+				
+				const docs = await this.plugin.retriever.retrieve(text);
+				context = this.plugin.retriever.buildContext(docs);
+				sources = Array.from(new Set(docs.map((c: { filePath: string }) => c.filePath)));
+				
+				if (docs.length > 0) {
+					const sourceList = sources.map(s => `- [[${s}]]`).join("\n");
+					this.appendTraceStep({ 
+						type: "observation", 
+						content: `Retrieved ${docs.length} notes as initial context:\n${sourceList}` 
+					}, traceList);
+				}
+				
+				// Persist the context in the history so it's available for follow-up questions
+				if (context) {
+					userMsg.ragContext = context;
+				}
 			}
 
 			const history = this.plugin.chatHistory.getOllamaHistory();

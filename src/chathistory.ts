@@ -4,6 +4,7 @@ import type { OllamaMessage } from "./ollama";
 export interface ChatMessage {
 	role: "user" | "assistant" | "system";
 	content: string;
+	ragContext?: string;
 	sources?: string[];
 	affectedFiles?: string[];
 	timestamp: number;
@@ -160,7 +161,7 @@ export class ChatHistoryManager {
 			.filter((m) => m.role !== "system")
 			.map((m) => ({
 				role: m.role,
-				content: m.content,
+				content: m.ragContext ? `${m.ragContext}\n\n**User Question:**\n${m.content}` : m.content,
 			}));
 
 		if (session.summary) {

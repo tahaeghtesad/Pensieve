@@ -345,8 +345,8 @@ export const searchVaultTool: Tool = {
 		ctx.settings.topK = origTopK;
 		if (results.length === 0) return { success: true, output: "No relevant results found." };
 		const formatted = results.map((r, i) =>
-			`[${i + 1}] ${r.filePath} (score: ${r.score.toFixed(3)})\n${r.text.slice(0, 300)}...`
-		).join("\n\n");
+			`[${i + 1}] ${r.filePath} (score: ${r.score.toFixed(3)})\n${r.text}`
+		).join("\n\n---\n\n");
 		return { success: true, output: formatted };
 	},
 };

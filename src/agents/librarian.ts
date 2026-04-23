@@ -8,6 +8,9 @@ export class LibrarianAgent extends ReActAgent {
 		"read_note",
 		"list_notes",
 		"search_vault",
+		"create_note",
+		"write_note",
+		"append_to_note",
 		"move_rename_note",
 		"archive_note",
 		"update_frontmatter",
@@ -31,7 +34,8 @@ export class LibrarianAgent extends ReActAgent {
 ### Vault Organization (PARA / Zettelkasten)
 - Survey the vault with list_notes and get_knowledge_graph.
 - Formulate organizational blueprints (Projects, Areas, Resources, Archives).
-- Use move_rename_note to restructure. Folders are auto-created.
+- Use create_note to generate new index or structure notes (like PARA_Framework.md).
+- Use move_rename_note to restructure existing notes. Folders are auto-created.
 - Use archive_note instead of deleting — safety first.
 
 ### Frontmatter Linting & Tagging
